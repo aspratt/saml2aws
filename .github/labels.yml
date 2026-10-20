@@ -1,0 +1,47 @@
+# Label set for docs/fork/PROCESS.md. Apply with:
+#   python3 -c 'import yaml,json,sys;print(json.dumps(yaml.safe_load(open(".github/labels.yml"))))' \
+#   | jq -c '.[]' | while read -r l; do gh label create "$(jq -r .name <<<"$l")" -R aspratt/saml2aws \
+#       --color "$(jq -r .color <<<"$l")" --description "$(jq -r .description <<<"$l")" --force; done
+- {name: "type:bug",          color: "d73a4a", description: "saml2aws does something wrong that it is meant to do right"}
+- {name: "type:uplift",       color: "0e8a16", description: "Toolchain, dependency, CI or platform currency"}
+- {name: "type:wishlist",     color: "a2eeef", description: "A new capability or behaviour"}
+- {name: "nature:security",   color: "b60205", description: "Confidentiality, integrity or credential safety"}
+- {name: "nature:functional", color: "fbca04", description: "Something that exists and should work"}
+- {name: "nature:gap",        color: "c5def5", description: "An IdP, flow or platform not supported yet"}
+- {name: "severity:S1",       color: "b60205", description: "Security exposure, or login broken for a provider with no workaround"}
+- {name: "severity:S2",       color: "d93f0b", description: "Common configuration broken, or a hard workaround"}
+- {name: "severity:S3",       color: "fbca04", description: "Degraded, with an easy workaround"}
+- {name: "severity:S4",       color: "c2e0c6", description: "Cosmetic, docs or a minor annoyance"}
+- {name: "status:intake",     color: "ededed", description: "Stage 1: record opened"}
+- {name: "status:classified", color: "ededed", description: "Stage 2: type, nature, severity and provider set"}
+- {name: "status:reproduced", color: "bfd4f2", description: "Stage 3: failing test committed"}
+- {name: "status:needs-repro",color: "f9d0c4", description: "Stage 3: cannot reproduce yet (reason in record)"}
+- {name: "status:accepted",   color: "0052cc", description: "Stage 4: accepted for change"}
+- {name: "status:deferred",   color: "d4c5f9", description: "Stage 4: deferred (reason in record)"}
+- {name: "status:wontfix",    color: "ffffff", description: "Stage 4: declined (reason in record)"}
+- {name: "status:duplicate",  color: "cfd3d7", description: "Stage 4: folded into another record"}
+- {name: "status:in-progress",color: "1d76db", description: "Stage 5: change being made"}
+- {name: "status:in-review",  color: "5319e7", description: "Stages 6-7: gate and review"}
+- {name: "status:done",       color: "0e8a16", description: "Stage 8: merged and released"}
+- {name: "provider:aad", color: "f5f5f5", description: "pkg/provider/aad"}
+- {name: "provider:adfs", color: "f5f5f5", description: "pkg/provider/adfs"}
+- {name: "provider:adfs2", color: "f5f5f5", description: "pkg/provider/adfs2"}
+- {name: "provider:akamai", color: "f5f5f5", description: "pkg/provider/akamai"}
+- {name: "provider:auth0", color: "f5f5f5", description: "pkg/provider/auth0"}
+- {name: "provider:authentik", color: "f5f5f5", description: "pkg/provider/authentik"}
+- {name: "provider:browser", color: "f5f5f5", description: "pkg/provider/browser"}
+- {name: "provider:f5apm", color: "f5f5f5", description: "pkg/provider/f5apm"}
+- {name: "provider:googleapps", color: "f5f5f5", description: "pkg/provider/googleapps"}
+- {name: "provider:jumpcloud", color: "f5f5f5", description: "pkg/provider/jumpcloud"}
+- {name: "provider:keycloak", color: "f5f5f5", description: "pkg/provider/keycloak"}
+- {name: "provider:netiq", color: "f5f5f5", description: "pkg/provider/netiq"}
+- {name: "provider:okta", color: "f5f5f5", description: "pkg/provider/okta"}
+- {name: "provider:onelogin", color: "f5f5f5", description: "pkg/provider/onelogin"}
+- {name: "provider:pingfed", color: "f5f5f5", description: "pkg/provider/pingfed"}
+- {name: "provider:pingntlm", color: "f5f5f5", description: "pkg/provider/pingntlm"}
+- {name: "provider:pingone", color: "f5f5f5", description: "pkg/provider/pingone"}
+- {name: "provider:shell", color: "f5f5f5", description: "pkg/provider/shell"}
+- {name: "provider:shibboleth", color: "f5f5f5", description: "pkg/provider/shibboleth"}
+- {name: "provider:shibbolethecp", color: "f5f5f5", description: "pkg/provider/shibbolethecp"}
+- {name: "provider:core", color: "f5f5f5", description: "CLI, config and credential code"}
+- {name: "provider:build", color: "f5f5f5", description: "Build, CI and packaging"}

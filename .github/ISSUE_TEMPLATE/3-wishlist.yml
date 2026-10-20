@@ -1,0 +1,58 @@
+name: Wishlist
+description: A new capability or behaviour.
+labels: ["type:wishlist", "status:intake"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Process: [docs/fork/PROCESS.md](../blob/master/docs/fork/PROCESS.md).
+  - type: dropdown
+    id: nature
+    attributes:
+      label: Nature
+      options: [gap, functional, security]
+    validations: { required: true }
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: core
+    validations: { required: true }
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: The capability, who needs it, and what they do today instead.
+    validations: { required: true }
+  - type: textarea
+    id: version
+    attributes:
+      label: Impacted version
+      value: |
+        Missing as of (fork tag):
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable behaviour that means "done". Each line should become a test.
+      value: |
+        - [ ]
+    validations: { required: true }
+  - type: textarea
+    id: test_env
+    attributes:
+      label: Test environment needed
+      description: IdP tenant, platform or account needed to test this live, or "harness only".
+  - type: input
+    id: upstream
+    attributes:
+      label: Upstream links
+      description: Every upstream issue/PR this record covers, e.g. Versent/saml2aws#1466, #1536.
+      placeholder: Versent/saml2aws#…
+  - type: textarea
+    id: upstream_text
+    attributes:
+      label: Upstream snapshot
+      description: Paste the upstream issue/PR text as it was when this record was opened, since upstream may change or delete it.
+      render: markdown

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/aspratt/saml2aws/security/advisories/new
+    about: Never open a public issue for a security problem. Use a private advisory.
+  - name: Change process
+    url: https://github.com/aspratt/saml2aws/blob/master/docs/fork/PROCESS.md
+    about: How every item moves from intake to release.

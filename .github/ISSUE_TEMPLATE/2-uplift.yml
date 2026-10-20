@@ -1,0 +1,59 @@
+name: Uplift
+description: Toolchain, dependency, CI or platform currency.
+labels: ["type:uplift", "status:intake"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Process: [docs/fork/PROCESS.md](../blob/master/docs/fork/PROCESS.md). Unpublished vulnerabilities go to a private advisory, not here.
+  - type: dropdown
+    id: nature
+    attributes:
+      label: Nature
+      options: [functional, "security (already public CVE only)", gap]
+    validations: { required: true }
+  - type: textarea
+    id: description
+    attributes:
+      label: What and why
+      description: Component, current version → target version, and why now (CVE, retirement, breakage).
+      value: |
+        Component:
+        Current → target:
+        Reason:
+    validations: { required: true }
+  - type: textarea
+    id: version
+    attributes:
+      label: Impacted version
+      value: |
+        Upstream: <first known> – <last known>
+        Confirmed on (fork tag): <tag, or "not reproduced">
+    validations: { required: true }
+  - type: textarea
+    id: risk
+    attributes:
+      label: Specific risk and its test
+      description: What could this uplift break, and which test proves it doesn't? Required by test rule 2.
+      value: |
+        Risk:
+        Test:
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps (if something is broken today)
+      value: |
+        1.
+  - type: input
+    id: upstream
+    attributes:
+      label: Upstream links
+      description: Every upstream issue/PR this record covers, e.g. Versent/saml2aws#1466, #1536.
+      placeholder: Versent/saml2aws#…
+  - type: textarea
+    id: upstream_text
+    attributes:
+      label: Upstream snapshot
+      description: Paste the upstream issue/PR text as it was when this record was opened, since upstream may change or delete it.
+      render: markdown

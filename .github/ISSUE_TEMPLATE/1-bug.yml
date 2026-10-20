@@ -1,0 +1,86 @@
+name: Bug
+description: saml2aws does something wrong that it is meant to do right.
+labels: ["type:bug", "status:intake"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Process: [docs/fork/PROCESS.md](../blob/master/docs/fork/PROCESS.md). **Security problems: do not use this form.** Use a private advisory.
+  - type: dropdown
+    id: nature
+    attributes:
+      label: Nature
+      options: [functional, gap, "security (already public CVE only)"]
+    validations: { required: true }
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      description: Directory under pkg/provider/, or core / build.
+      placeholder: keycloak
+    validations: { required: true }
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What is wrong, and who it affects.
+    validations: { required: true }
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected vs actual
+      value: |
+        Expected:
+        Actual:
+    validations: { required: true }
+  - type: textarea
+    id: version
+    attributes:
+      label: Impacted version
+      value: |
+        Upstream: <first known> – <last known>, e.g. unknown – v2.36.19
+        Confirmed on (fork tag): <tag, or "not reproduced">
+    validations: { required: true }
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      value: |
+        OS / arch:
+        IdP and version (e.g. Keycloak 26.0, Entra ID):
+        MFA type:
+        saml2aws flags / config (secrets removed):
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Numbered steps from a clean state. Name the harness test if one exists.
+      value: |
+        1.
+        2.
+        3.
+    validations: { required: true }
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Failing test name/branch, or logs with --verbose (remove passwords, tokens and assertions).
+      render: text
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround
+      description: Any known workaround, or "none".
+  - type: input
+    id: upstream
+    attributes:
+      label: Upstream links
+      description: Every upstream issue/PR this record covers, e.g. Versent/saml2aws#1466, #1536.
+      placeholder: Versent/saml2aws#…
+  - type: textarea
+    id: upstream_text
+    attributes:
+      label: Upstream snapshot
+      description: Paste the upstream issue/PR text as it was when this record was opened, since upstream may change or delete it.
+      render: markdown
