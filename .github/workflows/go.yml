@@ -37,6 +37,21 @@ jobs:
       - name: Install
         run: go install ./cmd/saml2aws
 
+  windows-keychain:
+    name: windows keychain
+    runs-on: windows-latest
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v4
+
+      - name: Set up Go 1.x
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Windows Credential Manager round trip
+        run: go test -count=1 -v -run TestWincredRoundTrip ./helper/wincred/
+
   linting:
     name: lint
     runs-on: ubuntu-latest
