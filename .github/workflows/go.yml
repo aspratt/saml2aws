@@ -39,7 +39,11 @@ jobs:
 
   windows-keychain:
     name: windows keychain
+    # Keep on GitHub-hosted runners: the test writes to the real Credential
+    # Manager, and a hosted VM is discarded after the job.
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out code into the Go module directory
         uses: actions/checkout@v4
@@ -50,7 +54,7 @@ jobs:
           go-version-file: "go.mod"
 
       - name: Windows Credential Manager round trip
-        run: go test -count=1 -v -run TestWincredRoundTrip ./helper/wincred/
+        run: go test -count=1 -v -cover ./helper/wincred/
 
   linting:
     name: lint

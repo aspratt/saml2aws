@@ -13,6 +13,8 @@ import (
 // real Windows Credential Manager. wincred v1.2.2 built with Go >= 1.25 fails
 // the write with "The stub received bad data" (aspratt/saml2aws#1).
 func TestWincredRoundTrip(t *testing.T) {
+	// Uses the real Credential Manager with PersistLocalMachine, as Add does in
+	// production. Run it only on throwaway (hosted CI) machines.
 	h := Wincred{}
 	url := fmt.Sprintf("https://saml2aws-test.invalid/%d", time.Now().UnixNano())
 	t.Cleanup(func() { _ = h.Delete(url) })
