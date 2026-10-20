@@ -34,8 +34,9 @@ change. Each worker session is bound to one record.
   pushes to the fork, runs the `e2e-aws` gate and handles releases.
 - **Workers** (Haiku sessions) edit and test in their own git worktree, then
   hand off the diff summary and test evidence. They never commit, push or tag,
-  and never post to GitHub. Each worktree sets its own `E2E_PROJECT` (see `test/e2e/README.md`)
-  before running the harness, so only one run is active per checkout.
+  and never post to GitHub. Each worktree sets its own `E2E_PROJECT` before
+  running the harness (see `test/e2e/README.md`), so parallel runs don't
+  collide.
 - **Commits** are made by oversight as **aspratt**, with no AI attribution:
   no `Co-Authored-By` trailers and no "Generated with" lines, in commits, PR
   text or comments.
