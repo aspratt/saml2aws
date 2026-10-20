@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/mxschmitt/playwright-go"
@@ -235,5 +237,25 @@ func TestAutoFill(t *testing.T) {
 
 		result, _ := page.Locator("div#result").Evaluate("el => el.innerText", nil)
 		assert.Equal(t, "golang:gopher", result)
+	}
+}
+
+func TestPrepareStorageStatePathCreatesDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	path, err := prepareStorageStatePath()
+	assert.NoError(t, err)
+
+	dir := filepath.Join(home, ".aws", "saml2aws")
+	assert.Equal(t, filepath.Join(dir, "storageState.json"), path)
+
+	info, err := os.Stat(dir)
+	if assert.NoError(t, err) {
+		assert.True(t, info.IsDir())
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+		}
 	}
 }

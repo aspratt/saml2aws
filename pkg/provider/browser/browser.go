@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -114,8 +115,7 @@ func (cl *Client) Authenticate(loginDetails *creds.LoginDetails) (string, error)
 	contextOptions := playwright.BrowserNewContextOptions{}
 
 	// load saved storageState if present and add to contextOptions
-	userHomeDir, err := os.UserHomeDir()
-	storageStatePath := fmt.Sprintf("%s/.aws/saml2aws/storageState.json", userHomeDir)
+	storageStatePath, err := prepareStorageStatePath()
 	if err != nil {
 		return "", err
 	}
@@ -153,6 +153,20 @@ func (cl *Client) Authenticate(loginDetails *creds.LoginDetails) (string, error)
 	}()
 
 	return getSAMLResponse(page, loginDetails, cl)
+}
+
+// prepareStorageStatePath returns the path of the saved storageState file and
+// makes sure its directory exists so the state can be saved after login.
+func prepareStorageStatePath() (string, error) {
+	userHomeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(userHomeDir, ".aws", "saml2aws")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "storageState.json"), nil
 }
 
 var getSAMLResponse = func(page playwright.Page, loginDetails *creds.LoginDetails, client *Client) (string, error) {
