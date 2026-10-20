@@ -2,10 +2,12 @@ package keycloak
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
@@ -371,7 +373,70 @@ func TestClient_doAuthenticate_CapsLoginFormReposts(t *testing.T) {
 	_, err = kc.Authenticate(loginDetails)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "login form was submitted")
-	require.Equal(t, maxLoginFormSubmissions, posts)
+	require.Equal(t, maxStalledLoginForms, posts)
+}
+
+// kcOtpPage is a Keycloak OTP page offering n credentials. Each radio's id and
+// value follow the provider's kc-otp-credential-<index> and cred-<index> scheme.
+func kcOtpPage(action string, n int) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<form id="kc-totp-login-form" action="%s" method="post">`, action)
+	for i := 0; i < n; i++ {
+		checked := ""
+		if i == 0 {
+			checked = ` checked="checked"`
+		}
+		fmt.Fprintf(&b, `<input id="kc-otp-credential-%d" type="radio" name="selectedCredentialId" value="cred-%d"%s>`, i, i, checked)
+	}
+	b.WriteString(`<input id="totp" name="totp" type="text"/><input name="login" type="submit" value="Log in"/></form>`)
+	return []byte(b.String())
+}
+
+// Only the last credential accepts the code. Each wrong code re-renders the OTP
+// page, and the provider cycles through the credentials via the recursion.
+// Those MFA retries must not count against the stalled-login cap.
+func TestClient_doAuthenticate_OTPCyclesAllCredentials(t *testing.T) {
+	const code = "123456"
+	for _, n := range []int{4, 5} {
+		t.Run(fmt.Sprintf("%d credentials", n), func(t *testing.T) {
+			login, err := os.ReadFile("example/loginpage.html")
+			require.Nil(t, err)
+			assertion, err := os.ReadFile("example/assertion.html")
+			require.Nil(t, err)
+
+			totpPosts := 0
+			var ts *httptest.Server
+			ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					_, _ = w.Write(bytes.ReplaceAll(login, []byte(exampleLoginURL), []byte(ts.URL+"/submit")))
+					return
+				}
+				switch r.URL.Path {
+				case "/submit":
+					_, _ = w.Write(kcOtpPage(ts.URL+"/totp", n))
+				case "/totp":
+					totpPosts++
+					if r.FormValue("selectedCredentialId") == fmt.Sprintf("cred-%d", n-1) && r.FormValue("totp") == code {
+						_, _ = w.Write(assertion)
+						return
+					}
+					_, _ = w.Write(kcOtpPage(ts.URL+"/totp", n))
+				}
+			}))
+			defer ts.Close()
+
+			opts := &provider.HTTPClientOptions{IsWithRetries: false}
+			kc := Client{client: &provider.HTTPClient{Client: http.Client{}, Options: opts}}
+			kc.authErrorValidator, err = CustomizeAuthErrorValidator(&cfg.IDPAccount{})
+			require.Nil(t, err)
+
+			loginDetails := &creds.LoginDetails{URL: ts.URL, Username: "test", Password: "test123", MFAToken: code}
+			samlResponse, err := kc.Authenticate(loginDetails)
+			require.NoError(t, err)
+			require.Equal(t, "abc123", samlResponse)
+			require.Equal(t, n, totpPosts)
+		})
+	}
 }
 
 func TestClient_passwordValid_CustomValidator(t *testing.T) {
