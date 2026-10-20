@@ -2,8 +2,10 @@
 # integration tests. Build context: the repository root.
 FROM node:20-bookworm-slim AS node
 
-FROM golang:1.22.5-bookworm
-ENV GOTOOLCHAIN=local CGO_ENABLED=1
+# No golang:1.27.3 image is published yet; start from the newest bookworm
+# image and let Go fetch the exact toolchain go.mod asks for (checksum-verified).
+FROM golang:1.27.1-bookworm
+ENV GOTOOLCHAIN=go1.27.3 CGO_ENABLED=1
 
 # The playwright-go version pinned in go.mod (v0.4702.0) downloads driver
 # 1.47.2 from the retired playwright.azureedge.net CDN. Assemble the same
@@ -25,6 +27,7 @@ RUN d=$PLAYWRIGHT_DRIVER_PATH/ms-playwright-go/1.47.2 && mkdir -p $d \
 
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go version && go mod download
 COPY . .
-RUN go build -o /usr/local/bin/saml2aws ./cmd/saml2aws && saml2aws --version
+RUN go version | grep -q 'go1.27.3 ' \
+ && go build -o /usr/local/bin/saml2aws ./cmd/saml2aws && saml2aws --version
