@@ -19,11 +19,31 @@ or PR it comes from. Security problems never get a public issue; see
 | 4 | Decide | The maintainer accepts, defers, declines or marks it a duplicate, and writes down why. | Decision and reason in the record | `status:accepted` / `status:deferred` / `status:wontfix` / `status:duplicate` |
 | 5 | Change | One record per branch (`<type>/<issue#>-<slug>`), cut from current `master`. Make the smallest change that fixes it. | The stage-3 test passes | `status:in-progress` |
 | 6 | Verify | Run the full gate (below) and link the evidence in the PR. | Every gate passes | `status:in-review` |
-| 7 | Review | Someone other than the author reviews the change; security items get a second review focused on security. | Review approved | `status:in-review` |
+| 7 | Review | **Fork:** an independent AI review, by a different model from the one that wrote the change and never Haiku, posts its findings on the PR. The maintainer then approves the merge. Security items also get a second review focused on security. **Upstream:** a second Versent maintainer reviews and accepts (below). | Findings addressed; maintainer approved (fork) or second maintainer approved (upstream) | `status:in-review` |
 | 8 | Release | Merge to `master` with the PR closing the record. Changes are released under a release tag. Offer the change upstream (below). | Merged; record closed; upstream PR linked or a reason given | `status:done` |
 
 Moving backwards is normal. If verify or review fails, go back to stage 5.
 If the fix changes the problem's scope, go back to stage 2.
+
+## Who does what
+
+Oversight is the maintainer's session. Workers are the sessions that make a
+change. Each worker session is bound to one record.
+
+- **Oversight** keeps the records, makes the stage-4 decisions, commits,
+  pushes to the fork, runs the `e2e-aws` gate and handles releases.
+- **Workers** (Haiku sessions) edit and test in their own git worktree, then
+  hand off the diff summary and test evidence. They never commit, push or tag,
+  and never post to GitHub. Each worktree sets its own `E2E_PROJECT` before
+  running the harness (see `test/e2e/README.md`), so parallel runs don't
+  collide.
+- **Commits** are made by oversight as **aspratt**, with no AI attribution:
+  no `Co-Authored-By` trailers and no "Generated with" lines, in commits, PR
+  text or comments.
+- **`e2e-aws`** runs serially through oversight only. The AWS SAML provider is
+  shared, so parallel runs interfere with each other and with other users.
+- **Stage-7 reviews** are done by an AI model other than the author's (never
+  Haiku), then approved by the maintainer. See stage 7 above.
 
 ## Classification
 
