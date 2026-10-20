@@ -78,19 +78,18 @@ account, so only one checkout should run `e2e-aws` at a time. Oversight runs it.
 
 ### Unit tests and Playwright
 
-The pinned `playwright-go v0.4702.0` downloads driver 1.47.2 from the retired
-`playwright.azureedge.net` CDN, so the four `pkg/provider/browser` tests fail
-anywhere today (404, then a nil-pointer panic in `TestAutoFill`). The runner
-image works around this through the environment only. It assembles the same
-driver from npm (`playwright-core@1.47.2` + Node 20) at
-`$PLAYWRIGHT_DRIVER_PATH/ms-playwright-go/1.47.2`, and sets
-`PLAYWRIGHT_DOWNLOAD_HOST` to the current CDN for the Chromium download.
+The runner image installs Chromium with the pinned playwright-go's own
+installer (`playwright install --with-deps chromium`, see `runner.Dockerfile`).
+The library fetches its driver from npm and Node.js from nodejs.org, and the
+browser from the Playwright CDN, so the four `pkg/provider/browser` tests need
+no environment overrides. `make unit` alone proves them.
 
 ## Integration tests (`e2e_test.go`, build tag `e2e`)
 
 | Test | Checks |
 |---|---|
 | `TestLoginWritesCredentials` | `login --skip-prompt` writes the `[e2e]` profile with key, secret and session token; `x_principal_arn` is the assumed-role ARN; expiry is about 1h out; the credentials work: `GetCallerIdentity` returns the assumed role |
+| `TestBrowserLoginWritesCredentials` | `login` through `--idp-provider=Browser`: headless Chromium autofills the username and password on the Keycloak login page, and the credentials match `TestLoginWritesCredentials`. Uses the driver and Chromium the runner image installed |
 | `TestScriptPrintsLoggedInCredentials` | `script --shell=env` prints the stored credentials |
 | `TestListRolesSingleRole` | `list-roles` shows the role from a one-role assertion. **Known bug, skipped** unless `E2E_KNOWN_BUGS=1` (see below) |
 | `TestWrongPasswordFailsWithErrorElementConfig` | a wrong password fails fast and writes no credentials, with `kc_auth_error_element` set for Keycloak 26 |
