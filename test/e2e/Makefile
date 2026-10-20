@@ -18,18 +18,19 @@ unit: build
 
 # Integration: Keycloak + moto standing in for STS.
 e2e: build
-	@trap '$(COMPOSE) down -v --remove-orphans >/dev/null 2>&1' EXIT; \
+	@set -e; trap '$(COMPOSE) down -v --remove-orphans >/dev/null 2>&1' EXIT; \
 	$(COMPOSE) run --rm e2e
 
 # Integration: Keycloak + real AWS STS. Needs AWS_PROFILE (SSO is fine).
 e2e-aws:
 	@test -n "$(AWS_PROFILE)" || { echo "set AWS_PROFILE=<profile>"; exit 2; }
-	@acct=$$(AWS_PROFILE=$(AWS_PROFILE) aws sts get-caller-identity --query Account --output text) && \
-	rm -f .work/realm.json && E2E_ACCOUNT_ID=$$acct scripts/render.sh && \
-	$(COMPOSE) --profile e2e-aws --profile tools build && \
+	@set -e; \
+	acct=$$(AWS_PROFILE=$(AWS_PROFILE) aws sts get-caller-identity --query Account --output text); \
+	E2E_ACCOUNT_ID=$$acct scripts/render.sh; \
+	$(COMPOSE) --profile e2e-aws --profile tools build; \
 	trap '$(COMPOSE) down -v --remove-orphans >/dev/null 2>&1' EXIT; \
-	$(COMPOSE) run --rm -T metadata > .work/idp-metadata.xml && \
-	AWS_PROFILE=$(AWS_PROFILE) scripts/aws-setup.sh .work/idp-metadata.xml && \
+	$(COMPOSE) run --rm -T metadata > .work/idp-metadata.xml; \
+	AWS_PROFILE=$(AWS_PROFILE) scripts/aws-setup.sh .work/idp-metadata.xml; \
 	$(COMPOSE) run --rm e2e-aws
 
 aws-teardown:
