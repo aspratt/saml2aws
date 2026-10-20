@@ -1,5 +1,14 @@
 # saml2aws end-to-end harness. See README.md.
-COMPOSE := docker compose -f docker-compose.yml
+# One name per checkout: it sets the Compose project and every image name.
+# Give each concurrent checkout its own, for example E2E_PROJECT=saml2aws-e2e-wi1994.
+# Only names starting with saml2aws-e2e are allowed, so `down -v` cannot reach
+# another stack on a shared Docker daemon.
+E2E_PROJECT ?= saml2aws-e2e
+ifneq ($(filter saml2aws-e2e%,$(E2E_PROJECT)),$(E2E_PROJECT))
+$(error E2E_PROJECT must start with saml2aws-e2e, got '$(E2E_PROJECT)')
+endif
+export E2E_PROJECT
+COMPOSE := docker compose -p $(E2E_PROJECT) -f docker-compose.yml
 AWS_PROFILE ?=
 
 .PHONY: all unit e2e e2e-aws aws-setup aws-teardown render build down clean

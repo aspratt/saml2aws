@@ -1,12 +1,14 @@
 # saml2aws end-to-end harness. No bind mounts: every image is built from a
 # build context, so this works against a local or a remote Docker daemon.
-name: saml2aws-e2e
+# E2E_PROJECT (set by the Makefile) names the Compose project and every image,
+# so checkouts with different names can run at the same time.
+name: ${E2E_PROJECT:-saml2aws-e2e}
 
 x-runner: &runner
   build:
     context: ../..
     dockerfile: test/e2e/runner.Dockerfile
-  image: saml2aws-e2e-runner
+  image: ${E2E_PROJECT:-saml2aws-e2e}-runner
   env_file: .work/e2e.env
   environment:
     E2E_IDP_URL: http://keycloak:8080/realms/e2e/protocol/saml/clients/amazon-aws
@@ -16,6 +18,7 @@ x-runner: &runner
 services:
   keycloak:
     build: { context: ., dockerfile: keycloak/Dockerfile }
+    image: ${E2E_PROJECT:-saml2aws-e2e}-keycloak
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
@@ -27,12 +30,14 @@ services:
 
   sts:
     build: { context: ., dockerfile: sts/Dockerfile }
+    image: ${E2E_PROJECT:-saml2aws-e2e}-sts
     networks:
       fakeaws:
         aliases: [sts.amazonaws.com, sts.us-east-1.amazonaws.com, sts.ap-southeast-2.amazonaws.com]
 
   signin:
     build: { context: ., dockerfile: sts/signin.Dockerfile }
+    image: ${E2E_PROJECT:-saml2aws-e2e}-signin
     networks:
       fakeaws:
         aliases: [signin.aws.amazon.com]

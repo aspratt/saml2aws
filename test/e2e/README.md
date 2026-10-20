@@ -13,10 +13,33 @@ Docker daemon and from a clean checkout.
 | `make aws-teardown` | Deletes the IAM resources `e2e-aws` created | `AWS_PROFILE` |
 | `make down` / `make clean` | Stop the stack / also delete `.work/` | |
 
-Run from this directory (`make -C test/e2e e2e` from the repo root). Run one
-target at a time per checkout: targets share `.work/` and the Compose project,
-so overlapping runs overwrite each other's realm and tear down each other's
-containers.
+Run from this directory (`make -C test/e2e e2e` from the repo root).
+
+### Running in several checkouts or worktrees at once
+
+Each checkout has its own `.work/`, but the Compose project and the image
+names come from `E2E_PROJECT` (default `saml2aws-e2e`). Give each concurrent
+checkout its own value, and images and containers stay separate:
+
+```sh
+# worktree A
+make -C test/e2e e2e E2E_PROJECT=saml2aws-e2e-featurea
+# worktree B, at the same time
+make -C test/e2e e2e E2E_PROJECT=saml2aws-e2e-featureb
+```
+
+Each run builds `<E2E_PROJECT>-runner`, `-keycloak`, `-sts` and `-signin`, and
+tears down only its own project. `E2E_PROJECT` must start with `saml2aws-e2e`,
+so the `down -v` cleanup can never reach another stack on a shared Docker
+daemon. Within one checkout, still run one target at a time, because the
+targets share `.work/`.
+
+Set it in the environment (`export E2E_PROJECT=...`) if you prefer. It is the
+same variable for `make down` and `make clean`, so pass it to those too.
+
+`make e2e-aws` stays serial, even across checkouts. The AWS SAML provider
+(`saml2aws-e2e`) and the role of that name are one shared IAM resource in the
+account, so only one checkout should run `e2e-aws` at a time. Oversight runs it.
 
 ## How it works
 
