@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,7 +14,9 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
@@ -429,6 +432,166 @@ func TestAuthenticateMalformedNTLMChallenge(t *testing.T) {
 		_, authErr = client.Authenticate(loginDetails)
 	})
 	require.Error(t, authErr)
+}
+
+const (
+	ntlmTestDomain   = "DOMAIN"
+	ntlmTestUser     = "testuser"
+	ntlmTestPassword = "testtestlol"
+	ntlmTestSAMLBody = "<samlp:Response/>"
+	ntlmTestSAMLForm = `<html><body><form method="POST" action="https://signin.aws.amazon.com/saml"><input type="hidden" name="SAMLResponse" value="%s"/></form></body></html>`
+)
+
+// ntlmTestServerChallenge is the nonce the mock IdP issues in its CHALLENGE.
+var ntlmTestServerChallenge = [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+
+func utf16LE(s string) []byte {
+	var b []byte
+	for _, u := range utf16.Encode([]rune(s)) {
+		b = binary.LittleEndian.AppendUint16(b, u)
+	}
+	return b
+}
+
+func fromUTF16LE(b []byte) string {
+	u := make([]uint16, len(b)/2)
+	for i := range u {
+		u[i] = binary.LittleEndian.Uint16(b[2*i:])
+	}
+	return string(utf16.Decode(u))
+}
+
+// appendVarField appends a security buffer descriptor: Len, MaxLen and BufferOffset.
+func appendVarField(b []byte, length, offset int) []byte {
+	b = binary.LittleEndian.AppendUint16(b, uint16(length))
+	b = binary.LittleEndian.AppendUint16(b, uint16(length))
+	return binary.LittleEndian.AppendUint32(b, uint32(offset))
+}
+
+// ntlmTestChallengeMessage builds a well-formed type-2 CHALLENGE as an NTLMv2 IdP
+// sends it: a target name, the server nonce and a TargetInfo block naming the domain.
+func ntlmTestChallengeMessage() []byte {
+	const headerLen = 48
+	const flags = 0x00880205 // UNICODE|REQUEST_TARGET|NTLM|NTLM2|TARGET_INFO
+
+	target := utf16LE(ntlmTestDomain)
+	info := binary.LittleEndian.AppendUint16(nil, 2) // MsvAvNbDomainName
+	info = binary.LittleEndian.AppendUint16(info, uint16(len(target)))
+	info = append(info, target...)
+	info = append(info, 0, 0, 0, 0) // MsvAvEOL
+
+	b := []byte("NTLMSSP\x00")
+	b = binary.LittleEndian.AppendUint32(b, 2) // MessageType: CHALLENGE
+	b = appendVarField(b, len(target), headerLen)
+	b = binary.LittleEndian.AppendUint32(b, flags)
+	b = append(b, ntlmTestServerChallenge[:]...)
+	b = append(b, make([]byte, 8)...) // reserved
+	b = appendVarField(b, len(info), headerLen+len(target))
+	b = append(b, target...)
+	return append(b, info...)
+}
+
+// parseNTLMTestAuthenticate reads the user, domain and NT response out of a
+// type-3 AUTHENTICATE message. ok is false if a field points outside the message.
+func parseNTLMTestAuthenticate(msg []byte) (user, domain string, ntResponse []byte, ok bool) {
+	field := func(off int) ([]byte, bool) {
+		if len(msg) < off+8 {
+			return nil, false
+		}
+		l := int(binary.LittleEndian.Uint16(msg[off:]))
+		o := int(binary.LittleEndian.Uint32(msg[off+4:]))
+		if o+l > len(msg) {
+			return nil, false
+		}
+		return msg[o : o+l], true
+	}
+	nt, ok1 := field(20)
+	dom, ok2 := field(28)
+	usr, ok3 := field(36)
+	if !ok1 || !ok2 || !ok3 {
+		return "", "", nil, false
+	}
+	return fromUTF16LE(usr), fromUTF16LE(dom), nt, true
+}
+
+// TestAuthenticateNTLMHandshake runs a full NTLMv2 handshake through Authenticate
+// against a mock IdP, so the v0.1.1 path is exercised end to end. The IdP offers
+// Basic and NTLM on its 401, which covers the v0.1.1 default of never sending Basic
+// credentials unless AllowBasicAuth is set. It also checks that the domain typed
+// in the username is the one that reaches the AUTHENTICATE message.
+func TestAuthenticateNTLMHandshake(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	record := func(step string) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, step)
+	}
+
+	samlResponse := base64.StdEncoding.EncodeToString([]byte(ntlmTestSAMLBody))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/idp/startSSO.ping" {
+			http.NotFound(w, r)
+			return
+		}
+
+		auth := r.Header.Get("Authorization")
+		if strings.HasPrefix(auth, "Basic ") {
+			record("basic")
+		}
+
+		switch {
+		case strings.HasPrefix(auth, "NTLM "):
+			msg, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(auth, "NTLM "))
+			if err != nil || len(msg) < 12 {
+				t.Errorf("malformed NTLM token: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			switch msg[8] {
+			case 1: // NEGOTIATE
+				record("type1")
+				w.Header().Set("WWW-Authenticate", "NTLM "+base64.StdEncoding.EncodeToString(ntlmTestChallengeMessage()))
+				w.WriteHeader(http.StatusUnauthorized)
+			case 3: // AUTHENTICATE
+				user, domain, nt, ok := parseNTLMTestAuthenticate(msg)
+				// An NTLMv2 response is a 16-byte NTProofStr followed by a blob
+				// that starts with RespType and HiRespType 0x01.
+				if !ok || user != ntlmTestUser || domain != ntlmTestDomain || len(nt) < 18 || nt[16] != 1 || nt[17] != 1 {
+					t.Errorf("unexpected AUTHENTICATE: user=%q domain=%q ntResponseLen=%d", user, domain, len(nt))
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				record("type3")
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprintf(w, ntlmTestSAMLForm, samlResponse)
+			default:
+				t.Errorf("unexpected NTLM message type %d", msg[8])
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		default:
+			// Basic first, so a client that honours it would send the password in clear text.
+			w.Header().Add("WWW-Authenticate", `Basic realm="idp"`)
+			w.Header().Add("WWW-Authenticate", "NTLM")
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	defer srv.Close()
+
+	client, err := New(&cfg.IDPAccount{Provider: "PingNTLM", MFA: "Auto"})
+	require.NoError(t, err)
+
+	loginDetails := &creds.LoginDetails{Username: ntlmTestDomain + "\\" + ntlmTestUser, Password: ntlmTestPassword, URL: srv.URL}
+
+	got, err := client.Authenticate(loginDetails)
+	require.NoError(t, err)
+	require.Equal(t, samlResponse, got)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"type1", "type3"}, seen)
 }
 
 func TestClient_follow(t *testing.T) {
