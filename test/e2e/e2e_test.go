@@ -8,6 +8,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,10 +44,16 @@ func mustEnv(t *testing.T, name string) string {
 // test instead of hanging it.
 func run(t *testing.T, home string, args ...string) (string, error) {
 	t.Helper()
+	return runEnv(t, home, nil, args...)
+}
+
+// runEnv is run with extra environment variables for saml2aws.
+func runEnv(t *testing.T, home string, extraEnv []string, args ...string) (string, error) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "saml2aws", args...)
-	cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH")}
+	cmd.Env = append([]string{"HOME=" + home, "PATH=" + os.Getenv("PATH")}, extraEnv...)
 	if v := os.Getenv("SSL_CERT_FILE"); v != "" {
 		cmd.Env = append(cmd.Env, "SSL_CERT_FILE="+v)
 	}
@@ -104,6 +111,13 @@ func TestLoginWritesCredentials(t *testing.T) {
 	_, err := run(t, home, loginArgs(t, mustEnv(t, "E2E_PASSWORD"))...)
 	require.NoError(t, err)
 
+	requireLoginCredentials(t, home)
+}
+
+// requireLoginCredentials checks the [e2e] profile a successful login wrote:
+// the keys, the assumed role and expiry, and that STS accepts them.
+func requireLoginCredentials(t *testing.T, home string) {
+	t.Helper()
 	s := readProfile(t, home)
 	for _, k := range []string{"aws_access_key_id", "aws_secret_access_key", "aws_session_token"} {
 		require.NotEmpty(t, s.Key(k).String(), k)
@@ -127,6 +141,55 @@ func TestLoginWritesCredentials(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, mustEnv(t, "E2E_ACCOUNT_ID"), aws.StringValue(id.Account))
 	require.Equal(t, assumedRoleARN(t), aws.StringValue(id.Arn))
+}
+
+// playwrightInstall finds the Playwright driver and Chromium that the runner
+// image installed for the test user. run() starts saml2aws with a fresh HOME
+// and the e2e networks are internal, so saml2aws cannot fetch them again. The
+// driver directory goes in browser_driver_dir; the browsers path goes in the
+// environment, where the driver reads it.
+func playwrightInstall(t *testing.T) (driverDir string, env []string) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	drivers, err := filepath.Glob(filepath.Join(home, ".cache", "ms-playwright-go", "*"))
+	require.NoError(t, err)
+	require.Len(t, drivers, 1, "expected one installed Playwright driver under ~/.cache/ms-playwright-go")
+	browsers := os.Getenv("PLAYWRIGHT_BROWSERS_PATH")
+	if browsers == "" {
+		browsers = filepath.Join(home, ".cache", "ms-playwright")
+	}
+	return drivers[0], []string{"PLAYWRIGHT_BROWSERS_PATH=" + browsers}
+}
+
+// TestBrowserLoginWritesCredentials logs in through the Browser provider:
+// headless Chromium opens the Keycloak login page, autofills the username and
+// password, and saml2aws reads the SAML response from the POST to the sign-in
+// stand-in. The credentials it writes must match TestLoginWritesCredentials.
+func TestBrowserLoginWritesCredentials(t *testing.T) {
+	driverDir, env := playwrightInstall(t)
+	home := t.TempDir()
+	cfg := fmt.Sprintf("[default]\nprovider = Browser\nheadless = true\nbrowser_driver_dir = %s\n", driverDir)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".saml2aws"), []byte(cfg), 0o600))
+
+	_, err := runEnv(t, home, env,
+		"login",
+		"--idp-provider=Browser",
+		"--url="+mustEnv(t, "E2E_IDP_URL"),
+		"--username="+mustEnv(t, "E2E_USERNAME"),
+		"--password="+mustEnv(t, "E2E_PASSWORD"),
+		"--browser-autofill",
+		"--mfa=Auto",
+		"--region="+region,
+		"--role="+mustEnv(t, "E2E_ROLE_ARN"),
+		"--profile="+profile,
+		"--session-duration=3600",
+		"--disable-keychain",
+		"--skip-prompt",
+	)
+	require.NoError(t, err)
+
+	requireLoginCredentials(t, home)
 }
 
 func TestScriptPrintsLoggedInCredentials(t *testing.T) {
