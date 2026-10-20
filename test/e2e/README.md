@@ -35,7 +35,8 @@ Run from this directory (`make -C test/e2e e2e` from the repo root).
 - **`signin`** stands in for `https://signin.aws.amazon.com/saml`.
   `saml2aws list-roles` POSTs the assertion there to read account names, and
   like AWS, the stand-in renders the role page from the assertion's Role
-  attributes.
+  attributes. With exactly one role, it copies AWS by skipping the chooser
+  and redirecting to the console.
 - `scripts/render.sh` writes everything generated into `.work/` (gitignored):
   the CA and STS certificate, a random user password, the realm (from
   `keycloak/realm.json.tmpl`) and `e2e.env`.
@@ -59,7 +60,7 @@ driver from npm (`playwright-core@1.47.2` + Node 20) at
 |---|---|
 | `TestLoginWritesCredentials` | `login --skip-prompt` writes the `[e2e]` profile with key, secret and session token; `x_principal_arn` is the assumed-role ARN; expiry is about 1h out; the credentials work: `GetCallerIdentity` returns the assumed role |
 | `TestScriptPrintsLoggedInCredentials` | `script --shell=env` prints the stored credentials |
-| `TestListRolesShowsAssertionRole` | `list-roles` shows the role from the assertion |
+| `TestListRolesSingleRole` | `list-roles` shows the role from a one-role assertion. **Known bug, skipped** unless `E2E_KNOWN_BUGS=1` (see below) |
 | `TestWrongPasswordFailsWithErrorElementConfig` | a wrong password fails fast and writes no credentials, with `kc_auth_error_element` set for Keycloak 26 |
 | `TestWrongPasswordFailsDefaultConfig` | the same with the default config. **Known bug, skipped** unless `E2E_KNOWN_BUGS=1` (see below) |
 
@@ -81,14 +82,24 @@ the IAM SAML provider's metadata, so a local Keycloak is enough. `e2e-aws`:
    creates the role `saml2aws-e2e`, which has **no policies**, and a trust
    policy that allows only `sts:AssumeRoleWithSAML` from that provider for
    audience `https://signin.aws.amazon.com/saml`. Both are tagged
-   `purpose=saml2aws-e2e`;
+   `purpose=saml2aws-e2e`. On first creation it waits 20s, because a
+   brand-new role gets `AccessDenied` from STS for a few seconds;
 4. runs the integration tests with no `fakeaws` network, so the real
    `sts.amazonaws.com` and `signin.aws.amazon.com` are used.
 
 `aws-teardown.sh` refuses to delete the role if anything has attached a policy
 to it.
 
-## Findings so far
+## Results (2026-10-20, master `65195ee`)
+
+| Tier | Result |
+|---|---|
+| `make unit` | 27/27 packages with tests pass (browser tests included, via the driver workaround) |
+| `make e2e` | 3 pass, 2 known-bug skips |
+| `make e2e-aws` (account `036900133147`) | 3 pass, 2 known-bug skips: real STS issues `assumed-role/saml2aws-e2e/e2e-user` |
+| `E2E_KNOWN_BUGS=1` | both known-bug tests fail as described below |
+
+## Findings
 
 1. **Build:** `go build ./cmd/saml2aws` and `go vet ./...` are clean (Go 1.22.5
    in the runner; Go 1.27 also builds it).
@@ -106,7 +117,13 @@ to it.
    than naming the bad password.
 4. `login` creates `~/.aws/credentials` and an empty `[profile]` section
    *before* it authenticates, so a failed login leaves them behind.
-5. `script` validates the IdP account (it needs `--url` and the provider)
+5. **`list-roles` prints nothing for a single-role user.** It POSTs the
+   assertion to `signin.aws.amazon.com/saml` and parses the role chooser,
+   but with one valid role AWS answers `302` to the console, so the chooser
+   never appears. `ParseAWSAccounts` follows the redirect, finds no
+   `fieldset > div.saml-account`, and saml2aws exits 0 with no output.
+   Verified against real AWS. Reproduce with `E2E_KNOWN_BUGS=1`.
+6. `script` validates the IdP account (it needs `--url` and the provider)
    even though it only prints stored credentials.
 
 ## PingOne tier: not built yet

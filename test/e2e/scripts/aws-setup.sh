@@ -20,8 +20,10 @@ else
   aws iam create-saml-provider --name "$name" --tags "${tags[@]}" \
     --saml-metadata-document "file://$metadata" >/dev/null
   echo "created $provider_arn"
+  provider_created=1
 fi
 
+created=${provider_created:-0}
 trust=$(cat <<JSON
 {"Version":"2012-10-17","Statement":[{"Effect":"Allow",
  "Principal":{"Federated":"$provider_arn"},
@@ -37,5 +39,13 @@ else
     --description "saml2aws e2e harness: no permissions, SAML-only trust" \
     --assume-role-policy-document "$trust" >/dev/null
   echo "created role $role"
+  created=1
+fi
+# A new role or provider takes a few seconds to reach STS and the sign-in
+# endpoint; the first AssumeRoleWithSAML otherwise gets AccessDenied.
+if [[ $created == 1 ]]; then
+  aws iam wait role-exists --role-name "$role"
+  echo "waiting 20s for IAM propagation"
+  sleep 20
 fi
 echo "$account"

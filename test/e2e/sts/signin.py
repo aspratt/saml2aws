@@ -1,6 +1,7 @@
 """Stand-in for https://signin.aws.amazon.com/saml, which saml2aws list-roles
 POSTs the assertion to so it can read account names. Like AWS, it renders the
-role chooser page from the Role attributes in the posted assertion."""
+role chooser page from the Role attributes in the posted assertion, and with
+exactly one role skips the chooser and redirects to the console."""
 import base64, html, re, ssl, sys, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -14,6 +15,12 @@ class Handler(BaseHTTPRequestHandler):
         accounts = {}
         for m in ROLE.finditer(assertion):
             accounts.setdefault(m.group(1).decode(), set()).add(m.group(0).decode())
+        if sum(len(r) for r in accounts.values()) == 1:
+            self.send_response(302)
+            self.send_header("Location", "https://console.aws.amazon.com/console/home")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         parts = []
         for acct, roles in sorted(accounts.items()):
             labels = "".join(
