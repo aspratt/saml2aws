@@ -99,7 +99,7 @@ to it.
 |---|---|
 | `make unit` | 27/27 packages with tests pass (browser tests included, via the driver workaround) |
 | `make e2e` | 3 pass, 2 known-bug skips |
-| `make e2e-aws` (account `036900133147`) | 3 pass, 2 known-bug skips: real STS issues `assumed-role/saml2aws-e2e/e2e-user` |
+| `make e2e-aws` (a real AWS account) | 3 pass, 2 known-bug skips: real STS issues `assumed-role/saml2aws-e2e/e2e-user` |
 | `E2E_KNOWN_BUGS=1` | both known-bug tests fail as described below |
 
 ## Findings
