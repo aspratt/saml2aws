@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/binary"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
@@ -382,6 +385,50 @@ func TestAuthenticateInvalidHost(t *testing.T) {
 	loginDetails := &creds.LoginDetails{Username: "testuser", Password: "testtestlol", URL: "https://id.example.com", MFAToken: "123456"}
 	_, err = client.Authenticate(loginDetails)
 	assert.ErrorContains(t, err, "no such host")
+}
+
+// malformedNTLMChallenge is a type-2 (CHALLENGE) message whose TargetName
+// varField has BufferOffset 0xFFFFFFF8 and Len 16. BufferOffset+Len wraps to 8
+// in uint32, so the old length check passes and the slice panics. This is
+// GO-2026-5543 / CVE-2026-32952 in github.com/Azure/go-ntlmssp.
+func malformedNTLMChallenge() []byte {
+	b := make([]byte, 0, 48)
+	b = append(b, []byte("NTLMSSP\x00")...)
+	b = binary.LittleEndian.AppendUint32(b, 2)          // MessageType: CHALLENGE
+	b = binary.LittleEndian.AppendUint16(b, 16)         // TargetName.Len
+	b = binary.LittleEndian.AppendUint16(b, 16)         // TargetName.MaxLen
+	b = binary.LittleEndian.AppendUint32(b, 0xFFFFFFF8) // TargetName.BufferOffset
+	b = binary.LittleEndian.AppendUint32(b, 0x00000001) // NegotiateFlags: UNICODE
+	b = append(b, make([]byte, 8)...)                   // ServerChallenge
+	b = append(b, make([]byte, 8)...)                   // reserved
+	b = append(b, make([]byte, 8)...)                   // TargetInfo (empty)
+	return b
+}
+
+// TestAuthenticateMalformedNTLMChallenge drives a server that answers the NTLM
+// negotiate with a malformed challenge, through Authenticate, which uses the
+// go-ntlmssp Negotiator. The old pin panics; a fixed pin must return an error.
+func TestAuthenticateMalformedNTLMChallenge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.Header.Get("Authorization"), "NTLM ") {
+			w.Header().Set("WWW-Authenticate", "NTLM "+base64.StdEncoding.EncodeToString(malformedNTLMChallenge()))
+		} else {
+			w.Header().Set("WWW-Authenticate", "NTLM")
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client, err := New(&cfg.IDPAccount{Provider: "PingNTLM", MFA: "Auto"})
+	require.NoError(t, err)
+
+	loginDetails := &creds.LoginDetails{Username: "DOMAIN\\testuser", Password: "testtestlol", URL: srv.URL}
+
+	var authErr error
+	require.NotPanics(t, func() {
+		_, authErr = client.Authenticate(loginDetails)
+	})
+	require.Error(t, authErr)
 }
 
 func TestClient_follow(t *testing.T) {
