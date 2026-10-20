@@ -665,7 +665,7 @@ func TestSetDeviceTokenCookie(t *testing.T) {
 	err = oc.setDeviceTokenCookie(loginDetails)
 	assert.Nil(t, err)
 
-	expectedDT := fmt.Sprintf("okta_%s_saml2aws", loginDetails.Username)
+	legacyDT := fmt.Sprintf("okta_%s_saml2aws", loginDetails.Username)
 	actualDT := ""
 	for _, c := range oc.client.Jar.Cookies(&url.URL{Scheme: "https", Host: "idp.example.com", Path: "/abc"}) {
 		if c.Name == "DT" {
@@ -673,7 +673,7 @@ func TestSetDeviceTokenCookie(t *testing.T) {
 		}
 	}
 	assert.NotEqual(t, actualDT, "")
-	assert.Equal(t, expectedDT, actualDT)
+	assert.NotEqual(t, legacyDT, actualDT)
 
 }
 

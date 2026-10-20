@@ -3,8 +3,10 @@ package okta
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -13,6 +15,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -361,29 +365,78 @@ func (oc *Client) getDeviceTokenFromOkta(loginDetails *creds.LoginDetails) (stri
 	return "", fmt.Errorf("unable to get a device token from okta")
 }
 
+// deviceTokenDir is where the device token file fallback lives. A variable so
+// tests can point it elsewhere.
+var deviceTokenDir = func() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".aws", "saml2aws"), nil
+}
+
 // deviceToken returns the Okta device token for this install. A random UUID is
 // generated on first use and kept in the credential store under
 // <idp url>/deviceToken, so Okta keeps remembering the device across runs.
-// Without a credential store the legacy username-derived value is used, which
-// keeps "remember this device" working for those installs.
+// Without a usable credential store the token is kept in a 0600 file under the
+// saml2aws config directory instead. The token is never derived from the username.
 func deviceToken(loginDetails *creds.LoginDetails) string {
-	legacy := fmt.Sprintf("okta_%s_saml2aws", loginDetails.Username)
 	if !credentials.SupportsStorage() {
-		logger.Debug("no credential store, using legacy okta device token")
-		return legacy
+		logger.Debug("no credential store, using okta device token file")
+		return fileDeviceToken(loginDetails.URL, uuid.NewString())
 	}
 
 	key := loginDetails.URL + "/deviceToken"
-	if _, dt, err := credentials.CurrentHelper.Get(key); err == nil && dt != "" {
+	_, dt, err := credentials.CurrentHelper.Get(key)
+	switch {
+	case err == nil && dt != "":
 		return dt
+	case err != nil && !credentials.IsErrCredentialsNotFound(err):
+		// Don't rotate a token we could not read; it may still be in the store.
+		logger.Warnf("unable to read okta device token from the credential store, using the device token file | err: %v", err)
+		return fileDeviceToken(loginDetails.URL, uuid.NewString())
 	}
 
-	dt := uuid.NewString()
+	dt = uuid.NewString()
 	if err := credentials.SaveCredentials(key, loginDetails.Username, dt); err != nil {
-		logger.Debugf("unable to store okta device token, using legacy value | err: %v", err)
-		return legacy
+		logger.Warnf("unable to store okta device token in the credential store, using the device token file; Okta may ask for MFA again | err: %v", err)
+		return fileDeviceToken(loginDetails.URL, dt)
 	}
 	return dt
+}
+
+// fileDeviceToken returns the device token kept in the fallback file for idpURL,
+// creating the file with candidate if it does not exist yet. If the file can't
+// be used, candidate is returned for this run only.
+func fileDeviceToken(idpURL, candidate string) string {
+	dir, err := deviceTokenDir()
+	if err != nil {
+		logger.Warnf("unable to find the saml2aws config directory, okta device token will not be remembered | err: %v", err)
+		return candidate
+	}
+	sum := sha256.Sum256([]byte(idpURL))
+	path := filepath.Join(dir, "okta-device-token-"+hex.EncodeToString(sum[:8]))
+
+	if b, err := os.ReadFile(path); err == nil {
+		if dt := strings.TrimSpace(string(b)); dt != "" {
+			return dt
+		}
+	} else if !os.IsNotExist(err) {
+		logger.Warnf("unable to read okta device token file %s, device will not be remembered | err: %v", path, err)
+		return candidate
+	}
+
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		logger.Warnf("unable to create %s, okta device token will not be remembered | err: %v", dir, err)
+		return candidate
+	}
+	if err := os.WriteFile(path, []byte(candidate), 0600); err != nil {
+		logger.Warnf("unable to write okta device token file %s, device will not be remembered | err: %v", path, err)
+		return candidate
+	}
+	// WriteFile keeps the mode of an existing file; make sure it is private.
+	_ = os.Chmod(path, 0600)
+	return candidate
 }
 
 // setDeviceTokenCookie sets the DT cookie in the HTTP Client cookie jar
