@@ -259,3 +259,36 @@ func TestPrepareStorageStatePathCreatesDir(t *testing.T) {
 		}
 	}
 }
+
+func TestPrepareStorageStatePathKeepsExistingDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	dir := filepath.Join(home, ".aws", "saml2aws")
+	require.NoError(t, os.MkdirAll(dir, 0755))
+	require.NoError(t, os.Chmod(dir, 0755))
+
+	path, err := prepareStorageStatePath()
+	assert.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "storageState.json"), path)
+
+	info, err := os.Stat(dir)
+	if assert.NoError(t, err) && runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0755), info.Mode().Perm())
+	}
+}
+
+func TestPrepareStorageStatePathWrapsError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	// a file where the .aws directory should be makes MkdirAll fail
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".aws"), nil, 0600))
+
+	_, err := prepareStorageStatePath()
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "creating storageState directory")
+	}
+}

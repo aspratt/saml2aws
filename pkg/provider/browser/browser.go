@@ -53,6 +53,13 @@ func contains(s []string, str string) bool {
 	return false
 }
 func (cl *Client) Authenticate(loginDetails *creds.LoginDetails) (string, error) {
+	// resolve the storageState path before starting Playwright so a failure
+	// here doesn't leave the driver or browser running
+	storageStatePath, err := prepareStorageStatePath()
+	if err != nil {
+		return "", err
+	}
+
 	runOptions := playwright.RunOptions{}
 	if cl.BrowserDriverDir != "" {
 		runOptions.DriverDirectory = cl.BrowserDriverDir
@@ -115,10 +122,6 @@ func (cl *Client) Authenticate(loginDetails *creds.LoginDetails) (string, error)
 	contextOptions := playwright.BrowserNewContextOptions{}
 
 	// load saved storageState if present and add to contextOptions
-	storageStatePath, err := prepareStorageStatePath()
-	if err != nil {
-		return "", err
-	}
 	if _, err := os.Stat(storageStatePath); err == nil {
 		contextOptions.StorageStatePath = playwright.String(storageStatePath)
 	}
@@ -160,11 +163,11 @@ func (cl *Client) Authenticate(loginDetails *creds.LoginDetails) (string, error)
 func prepareStorageStatePath() (string, error) {
 	userHomeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("finding home directory for storageState: %w", err)
 	}
 	dir := filepath.Join(userHomeDir, ".aws", "saml2aws")
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
+		return "", fmt.Errorf("creating storageState directory %s: %w", dir, err)
 	}
 	return filepath.Join(dir, "storageState.json"), nil
 }
