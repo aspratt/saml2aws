@@ -438,6 +438,7 @@ const (
 	ntlmTestDomain   = "DOMAIN"
 	ntlmTestUser     = "testuser"
 	ntlmTestPassword = "testtestlol"
+	ntlmTestRealm    = "example.com"
 	ntlmTestSAMLBody = "<samlp:Response/>"
 	ntlmTestSAMLForm = `<html><body><form method="POST" action="https://signin.aws.amazon.com/saml"><input type="hidden" name="SAMLResponse" value="%s"/></form></body></html>`
 )
@@ -520,6 +521,19 @@ func parseNTLMTestAuthenticate(msg []byte) (user, domain string, ntResponse []by
 // credentials unless AllowBasicAuth is set. It also checks that the domain typed
 // in the username is the one that reaches the AUTHENTICATE message.
 func TestAuthenticateNTLMHandshake(t *testing.T) {
+	runNTLMHandshake(t, ntlmTestDomain+"\\"+ntlmTestUser, ntlmTestUser, ntlmTestDomain)
+}
+
+// TestAuthenticateNTLMHandshakeUPN covers a UPN login (user@realm). v0.1.1 splits
+// on the backslash only, so the whole UPN goes out as the user with an empty domain.
+func TestAuthenticateNTLMHandshakeUPN(t *testing.T) {
+	upn := ntlmTestUser + "@" + ntlmTestRealm
+	runNTLMHandshake(t, upn, upn, "")
+}
+
+// runNTLMHandshake drives the handshake for username and asserts the user and
+// domain fields that reach the AUTHENTICATE message.
+func runNTLMHandshake(t *testing.T, username, wantUser, wantDomain string) {
 	var mu sync.Mutex
 	var seen []string
 	record := func(step string) {
@@ -559,7 +573,7 @@ func TestAuthenticateNTLMHandshake(t *testing.T) {
 				user, domain, nt, ok := parseNTLMTestAuthenticate(msg)
 				// An NTLMv2 response is a 16-byte NTProofStr followed by a blob
 				// that starts with RespType and HiRespType 0x01.
-				if !ok || user != ntlmTestUser || domain != ntlmTestDomain || len(nt) < 18 || nt[16] != 1 || nt[17] != 1 {
+				if !ok || user != wantUser || domain != wantDomain || len(nt) < 18 || nt[16] != 1 || nt[17] != 1 {
 					t.Errorf("unexpected AUTHENTICATE: user=%q domain=%q ntResponseLen=%d", user, domain, len(nt))
 					w.WriteHeader(http.StatusUnauthorized)
 					return
@@ -583,7 +597,7 @@ func TestAuthenticateNTLMHandshake(t *testing.T) {
 	client, err := New(&cfg.IDPAccount{Provider: "PingNTLM", MFA: "Auto"})
 	require.NoError(t, err)
 
-	loginDetails := &creds.LoginDetails{Username: ntlmTestDomain + "\\" + ntlmTestUser, Password: ntlmTestPassword, URL: srv.URL}
+	loginDetails := &creds.LoginDetails{Username: username, Password: ntlmTestPassword, URL: srv.URL}
 
 	got, err := client.Authenticate(loginDetails)
 	require.NoError(t, err)
