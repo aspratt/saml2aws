@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/google/uuid"
 	"github.com/marshallbrekka/go-u2fhost"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -360,10 +361,34 @@ func (oc *Client) getDeviceTokenFromOkta(loginDetails *creds.LoginDetails) (stri
 	return "", fmt.Errorf("unable to get a device token from okta")
 }
 
+// deviceToken returns the Okta device token for this install. A random UUID is
+// generated on first use and kept in the credential store under
+// <idp url>/deviceToken, so Okta keeps remembering the device across runs.
+// Without a credential store the legacy username-derived value is used, which
+// keeps "remember this device" working for those installs.
+func deviceToken(loginDetails *creds.LoginDetails) string {
+	legacy := fmt.Sprintf("okta_%s_saml2aws", loginDetails.Username)
+	if !credentials.SupportsStorage() {
+		logger.Debug("no credential store, using legacy okta device token")
+		return legacy
+	}
+
+	key := loginDetails.URL + "/deviceToken"
+	if _, dt, err := credentials.CurrentHelper.Get(key); err == nil && dt != "" {
+		return dt
+	}
+
+	dt := uuid.NewString()
+	if err := credentials.SaveCredentials(key, loginDetails.Username, dt); err != nil {
+		logger.Debugf("unable to store okta device token, using legacy value | err: %v", err)
+		return legacy
+	}
+	return dt
+}
+
 // setDeviceTokenCookie sets the DT cookie in the HTTP Client cookie jar
-// using the okta_<loginDetails.Username>_saml2aws, we reduce making an extra api call
-// this func can be uplifted in the future to set custom device tokens or used with
-// getDeviceTokenFromOkta function
+// using a per-install device token (see deviceToken), we reduce making an extra api call
+// this func can be uplifted in the future to use getDeviceTokenFromOkta
 func (oc *Client) setDeviceTokenCookie(loginDetails *creds.LoginDetails) error {
 
 	// getDeviceTokenFromOkta is not used but doing this to keep the function code
@@ -385,8 +410,8 @@ func (oc *Client) setDeviceTokenCookie(loginDetails *creds.LoginDetails) error {
 	cookie := http.Cookie{
 		Name:    "DT",
 		Secure:  true,
-		Expires: time.Now().Add(time.Hour * 24 * 30),                    // 30 Days -> this time might not matter as this cookie is set on every saml2aws login request
-		Value:   fmt.Sprintf("okta_%s_saml2aws", loginDetails.Username), // Okta recommends using an UUID but this should be unique enough. Also, this is key to remembering Okta MFA device
+		Expires: time.Now().Add(time.Hour * 24 * 30), // 30 Days -> this time might not matter as this cookie is set on every saml2aws login request
+		Value:   deviceToken(loginDetails),           // key to remembering the Okta MFA device
 	}
 	cookies = append(cookies, &cookie)
 	oc.client.Jar.SetCookies(baseURL, cookies)
