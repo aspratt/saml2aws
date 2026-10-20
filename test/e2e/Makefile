@@ -4,10 +4,16 @@
 # Only names starting with saml2aws-e2e are allowed, so `down -v` cannot reach
 # another stack on a shared Docker daemon.
 E2E_PROJECT ?= saml2aws-e2e
+export E2E_PROJECT
 ifneq ($(filter saml2aws-e2e%,$(E2E_PROJECT)),$(E2E_PROJECT))
 $(error E2E_PROJECT must start with saml2aws-e2e, got '$(E2E_PROJECT)')
 endif
-export E2E_PROJECT
+# The value is read from the environment, not spliced into the shell command,
+# so quotes and ';' in it cannot change what the shell runs.
+E2E_PROJECT_OK := $(shell printenv E2E_PROJECT | grep -Eq '^saml2aws-e2e[a-z0-9_-]*$$' && echo yes)
+ifneq ($(E2E_PROJECT_OK),yes)
+$(error E2E_PROJECT must match ^saml2aws-e2e[a-z0-9_-]*$$ (lowercase letters, digits, - and _ only; no quotes or ;), got '$(E2E_PROJECT)')
+endif
 COMPOSE := docker compose -p $(E2E_PROJECT) -f docker-compose.yml
 AWS_PROFILE ?=
 

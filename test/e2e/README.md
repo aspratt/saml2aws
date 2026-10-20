@@ -29,8 +29,14 @@ make -C test/e2e e2e E2E_PROJECT=saml2aws-e2e-featureb
 ```
 
 Each run builds `<E2E_PROJECT>-runner`, `-keycloak`, `-sts` and `-signin`, and
-tears down only its own project. `E2E_PROJECT` must start with `saml2aws-e2e`,
-so the `down -v` cleanup can never reach another stack on a shared Docker
+tears down only its own project.
+
+**Two checkouts that use the same `E2E_PROJECT` still collide, and that includes
+the default `saml2aws-e2e`.** They share image tags and a Compose project, so
+one run can overwrite the other's images and tear down its containers. Give
+every worktree its own name. `E2E_PROJECT` must start with `saml2aws-e2e` and
+use only lowercase letters, digits, `-` and `_`. The Makefile refuses anything
+else, so the `down -v` cleanup can never reach another stack on a shared Docker
 daemon. Within one checkout, still run one target at a time, because the
 targets share `.work/`.
 
