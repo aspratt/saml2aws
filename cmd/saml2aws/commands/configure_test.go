@@ -13,6 +13,7 @@ import (
 	"github.com/versent/saml2aws/v2/mocks"
 	"github.com/versent/saml2aws/v2/pkg/cfg"
 	"github.com/versent/saml2aws/v2/pkg/flags"
+	"github.com/versent/saml2aws/v2/pkg/prompter"
 	"github.com/versent/saml2aws/v2/pkg/provider/onelogin"
 )
 
@@ -155,7 +156,7 @@ func TestStoreCredentialsOnMissingOneLoginClientIdExitsProgram(t *testing.T) {
 }
 
 func TestStoreCredentialsOnMissingOneLoginClientSecretExitsProgram(t *testing.T) {
-	commonFlags := &flags.CommonFlags{DisableKeychain: false, ClientID: "oneloginSecret", ClientSecret: ""}
+	commonFlags := &flags.CommonFlags{DisableKeychain: false, ClientID: "oneloginSecret", ClientSecret: "", SkipPrompt: true}
 	idpAccount := &cfg.IDPAccount{
 		URL:      "https://id.example.com",
 		MFA:      "none",
@@ -231,4 +232,42 @@ func TestStoreCredentialsOnProvidedOneLoginHandlesErrorOnSavesCredentials(t *tes
 
 	assert.ErrorContains(t, result, "failed again")
 	assert.ErrorContains(t, result, "error storing client_id and client_secret in keychain")
+}
+
+func TestStoreCredentialsPromptsForMissingOneLoginClientSecret(t *testing.T) {
+	commonFlags := &flags.CommonFlags{DisableKeychain: false, ClientID: "oneloginId", ClientSecret: ""}
+	idpAccount := &cfg.IDPAccount{
+		URL:      "https://id.example.com",
+		MFA:      "none",
+		Provider: onelogin.ProviderName,
+		Username: "wolfeidau",
+	}
+	helperMock := &mocks.Helper{}
+	helperMock.Mock.On("Add", &credentials.Credentials{ServerURL: "https://id.example.com", Username: "wolfeidau", Secret: "password"}).Return(nil).Once()
+	helperMock.Mock.On("Add", &credentials.Credentials{ServerURL: path.Join("https://id.example.com", OneLoginOAuthPath), Username: "oneloginId", Secret: "promptedSecret"}).Return(nil).Once()
+	oldCurrentHelper := credentials.CurrentHelper
+	defer func() {
+		credentials.CurrentHelper = oldCurrentHelper
+	}()
+	credentials.CurrentHelper = helperMock
+
+	prompterMock := &mocks.Prompter{}
+	prompterMock.Mock.On("Password", "Client Secret").Return("promptedSecret").Once()
+	oldPrompter := prompter.ActivePrompter
+	defer prompter.SetPrompter(oldPrompter)
+	prompter.SetPrompter(prompterMock)
+
+	result := storeCredentials(commonFlags, idpAccount, "password")
+
+	assert.Nil(t, result)
+	prompterMock.AssertExpectations(t)
+	helperMock.AssertNumberOfCalls(t, "Add", 2)
+}
+
+func TestClientSecretOnArgv(t *testing.T) {
+	assert.True(t, ClientSecretOnArgv([]string{"configure", "--client-secret", "s3cret"}))
+	assert.True(t, ClientSecretOnArgv([]string{"login", "--client-secret=s3cret"}))
+	assert.False(t, ClientSecretOnArgv([]string{"login", "--client-id", "abc"}))
+	assert.False(t, ClientSecretOnArgv([]string{"login", "--", "--client-secret"}))
+	assert.False(t, ClientSecretOnArgv(nil))
 }

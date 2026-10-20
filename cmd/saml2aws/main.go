@@ -97,7 +97,7 @@ func main() {
 	cmdConfigure := app.Command("configure", "Configure a new IDP account.")
 	cmdConfigure.Flag("app-id", "OneLogin app id required for SAML assertion. (env: ONELOGIN_APP_ID)").Envar("ONELOGIN_APP_ID").StringVar(&commonFlags.AppID)
 	cmdConfigure.Flag("client-id", "OneLogin client id, used to generate API access token. (env: ONELOGIN_CLIENT_ID)").Envar("ONELOGIN_CLIENT_ID").StringVar(&commonFlags.ClientID)
-	cmdConfigure.Flag("client-secret", "OneLogin client secret, used to generate API access token. (env: ONELOGIN_CLIENT_SECRET)").Envar("ONELOGIN_CLIENT_SECRET").StringVar(&commonFlags.ClientSecret)
+	cmdConfigure.Flag("client-secret", "Deprecated: visible to other users in the process list. OneLogin client secret, used to generate API access token. (env: ONELOGIN_CLIENT_SECRET)").Envar("ONELOGIN_CLIENT_SECRET").StringVar(&commonFlags.ClientSecret)
 	cmdConfigure.Flag("subdomain", "OneLogin subdomain of your company account. (env: ONELOGIN_SUBDOMAIN)").Envar("ONELOGIN_SUBDOMAIN").StringVar(&commonFlags.Subdomain)
 	cmdConfigure.Flag("mfa-ip-address", "IP address whitelisting defined in OneLogin MFA policies. (env: ONELOGIN_MFA_IP_ADDRESS)").Envar("ONELOGIN_MFA_IP_ADDRESS").StringVar(&commonFlags.MFAIPAddress)
 	cmdConfigure.Flag("profile", "The AWS profile to save the temporary credentials. (env: SAML2AWS_PROFILE)").Envar("SAML2AWS_PROFILE").Short('p').StringVar(&commonFlags.Profile)
@@ -116,7 +116,7 @@ func main() {
 	cmdLogin.Flag("profile", "The AWS profile to save the temporary credentials. (env: SAML2AWS_PROFILE)").Short('p').Envar("SAML2AWS_PROFILE").StringVar(&commonFlags.Profile)
 	cmdLogin.Flag("duo-mfa-option", "The MFA option you want to use to authenticate with (supported providers: okta). (env: SAML2AWS_DUO_MFA_OPTION)").Envar("SAML2AWS_DUO_MFA_OPTION").EnumVar(&loginFlags.DuoMFAOption, "Passcode", "Duo Push")
 	cmdLogin.Flag("client-id", "OneLogin client id, used to generate API access token. (env: ONELOGIN_CLIENT_ID)").Envar("ONELOGIN_CLIENT_ID").StringVar(&commonFlags.ClientID)
-	cmdLogin.Flag("client-secret", "OneLogin client secret, used to generate API access token. (env: ONELOGIN_CLIENT_SECRET)").Envar("ONELOGIN_CLIENT_SECRET").StringVar(&commonFlags.ClientSecret)
+	cmdLogin.Flag("client-secret", "Deprecated: visible to other users in the process list. OneLogin client secret, used to generate API access token. (env: ONELOGIN_CLIENT_SECRET)").Envar("ONELOGIN_CLIENT_SECRET").StringVar(&commonFlags.ClientSecret)
 	cmdLogin.Flag("mfa-ip-address", "IP address whitelisting defined in OneLogin MFA policies. (env: ONELOGIN_MFA_IP_ADDRESS)").Envar("ONELOGIN_MFA_IP_ADDRESS").StringVar(&commonFlags.MFAIPAddress)
 	cmdLogin.Flag("force", "Refresh credentials even if not expired.").BoolVar(&loginFlags.Force)
 	cmdLogin.Flag("credential-process", "Enables AWS Credential Process support by outputting credentials to STDOUT in a JSON message.").BoolVar(&loginFlags.CredentialProcess)
@@ -169,6 +169,10 @@ func main() {
 
 	// Trigger the parsing of the command line inputs via kingpin
 	command := kingpin.MustParse(app.Parse(os.Args[1:]))
+
+	if commands.ClientSecretOnArgv(os.Args[1:]) {
+		log.Println("WARNING: --client-secret is deprecated because other local users can read it from the process list. Set ONELOGIN_CLIENT_SECRET, or omit it so saml2aws prompts for it and keeps it in the keychain.")
+	}
 
 	// will leave this here for a while during upgrade process
 	if *provider != "" {
