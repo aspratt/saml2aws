@@ -57,5 +57,3 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/playwright-community/playwright-go => github.com/mxschmitt/playwright-go v0.6201.1
