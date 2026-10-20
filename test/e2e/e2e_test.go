@@ -148,6 +148,11 @@ func TestScriptPrintsLoggedInCredentials(t *testing.T) {
 // redirect finds no accounts, list-roles falls back to the roles in the
 // assertion (fork issue aspratt/saml2aws#14).
 func TestListRolesSingleRole(t *testing.T) {
+	// list-roles always posts to the real AWS sign-in page, which moto doesn't
+	// stand in for and the offline lane can't reach, so this runs in e2e-aws only.
+	if mustEnv(t, "E2E_TARGET") != "aws" {
+		t.Skip("needs the real AWS sign-in page; runs in the e2e-aws lane only")
+	}
 	home := t.TempDir()
 	out, err := run(t, home, append(append([]string{"list-roles"}, idpArgs(t)...),
 		"--password="+mustEnv(t, "E2E_PASSWORD"))...)
