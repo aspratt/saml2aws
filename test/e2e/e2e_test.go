@@ -173,15 +173,10 @@ func requireNoCredentials(t *testing.T, home string) {
 	}
 }
 
-// Known bug: Keycloak 26's login theme reports a bad password in
-// div#input-error-password, which the default kc_auth_error_element
-// ("span#input-error, div#input-error-username") does not match. saml2aws
-// then never sees the error and re-posts the login form until the run is
-// killed. Set E2E_KNOWN_BUGS=1 to run it.
+// Keycloak 26's login theme reports a bad password in div#input-error-password,
+// which the default kc_auth_error_element now matches. Without it saml2aws
+// re-posted the login form until the run was killed (#13).
 func TestWrongPasswordFailsDefaultConfig(t *testing.T) {
-	if os.Getenv("E2E_KNOWN_BUGS") == "" {
-		t.Skip("known bug: wrong password loops against Keycloak 26 with the default kc_auth_error_element")
-	}
 	home := t.TempDir()
 	_, err := run(t, home, loginArgs(t, "definitely-not-the-password")...)
 	require.Error(t, err)

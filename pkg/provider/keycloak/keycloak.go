@@ -35,9 +35,14 @@ type Client struct {
 var (
 	defaultAuthErrorElementV1 = "span#input-error"
 	defaultAuthErrorElementV2 = "div#input-error-username"
-	DefaultAuthErrorElement   = fmt.Sprintf("%s, %s", defaultAuthErrorElementV1, defaultAuthErrorElementV2)
+	defaultAuthErrorElementV3 = "div#input-error-password"
+	DefaultAuthErrorElement   = fmt.Sprintf("%s, %s, %s", defaultAuthErrorElementV1, defaultAuthErrorElementV2, defaultAuthErrorElementV3)
 	DefaultAuthErrorMessage   = "Invalid username or password."
 )
+
+// maxLoginFormSubmissions caps how many times one Authenticate call submits the
+// login form when the response has no SAML assertion and no recognised error.
+const maxLoginFormSubmissions = 3
 
 type authErrorValidator struct {
 	httpMessageRE *regexp.Regexp
@@ -48,6 +53,7 @@ type authContext struct {
 	mfaToken                string
 	authenticatorIndex      uint
 	authenticatorIndexValid bool
+	loginFormSubmissions    int
 }
 
 // New create a new KeyCloakClient
@@ -94,7 +100,7 @@ func CustomizeAuthErrorValidator(account *cfg.IDPAccount) (*authErrorValidator, 
 
 // Authenticate logs into KeyCloak and returns a SAML response
 func (kc *Client) Authenticate(loginDetails *creds.LoginDetails) (string, error) {
-	return kc.doAuthenticate(&authContext{loginDetails.MFAToken, 0, true}, loginDetails)
+	return kc.doAuthenticate(&authContext{loginDetails.MFAToken, 0, true, 0}, loginDetails)
 }
 
 func (kc *Client) doAuthenticate(authCtx *authContext, loginDetails *creds.LoginDetails) (string, error) {
@@ -104,6 +110,7 @@ func (kc *Client) doAuthenticate(authCtx *authContext, loginDetails *creds.Login
 	}
 
 	data, err := kc.postLoginForm(authSubmitURL, authForm)
+	authCtx.loginFormSubmissions++
 	if err != nil {
 		return "", fmt.Errorf("error submitting login form")
 	}
@@ -143,6 +150,9 @@ func (kc *Client) doAuthenticate(authCtx *authContext, loginDetails *creds.Login
 	}
 	samlResponse, err := extractSamlResponse(doc)
 	if err != nil && authCtx.authenticatorIndexValid && passwordValid(doc, kc.authErrorValidator) {
+		if authCtx.loginFormSubmissions >= maxLoginFormSubmissions {
+			return "", fmt.Errorf("login form was submitted %d times without a SAML response or a recognised error; check kc_auth_error_element matches the IdP's error element", authCtx.loginFormSubmissions)
+		}
 		return kc.doAuthenticate(authCtx, loginDetails)
 	}
 	return samlResponse, err

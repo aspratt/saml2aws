@@ -152,7 +152,7 @@ func TestClient_postTotpForm(t *testing.T) {
 
 	pr.Mock.On("RequestSecurityCode", "000000").Return("123456")
 
-	authCtx := &authContext{"", 0, true}
+	authCtx := &authContext{"", 0, true, 0}
 	opts := &provider.HTTPClientOptions{IsWithRetries: false}
 	kc := Client{client: &provider.HTTPClient{Client: http.Client{}, Options: opts}}
 
@@ -182,7 +182,7 @@ func TestClient_postTotpFormWithProvidedMFAToken(t *testing.T) {
 	pr := &mocks.Prompter{}
 	prompter.SetPrompter(pr)
 
-	authCtx := &authContext{"123456", 0, true}
+	authCtx := &authContext{"123456", 0, true, 0}
 	opts := &provider.HTTPClientOptions{IsWithRetries: false}
 	kc := Client{client: &provider.HTTPClient{Client: http.Client{}, Options: opts}}
 
@@ -211,7 +211,7 @@ func TestClient_postTotpFormWithMultipleAuthenticators(t *testing.T) {
 	pr := &mocks.Prompter{}
 	prompter.SetPrompter(pr)
 
-	authCtx := &authContext{"123456", 0, true}
+	authCtx := &authContext{"123456", 0, true, 0}
 	opts := &provider.HTTPClientOptions{IsWithRetries: false}
 	kc := Client{client: &provider.HTTPClient{Client: http.Client{}, Options: opts}}
 
@@ -323,6 +323,7 @@ func TestClient_passwordValid_DefaultValidator(t *testing.T) {
 	}{
 		{name: "v1", file: "example/authError-invalidPassword.html"},
 		{name: "v2", file: "example/authError-invalidPassword-v2.html"},
+		{name: "kc26", file: "example/authError-invalidPassword-kc26.html"},
 	}
 
 	for _, tc := range tCases {
@@ -336,6 +337,41 @@ func TestClient_passwordValid_DefaultValidator(t *testing.T) {
 			require.Equal(t, passwordValid(doc, authErrorValidator), false)
 		})
 	}
+}
+
+// A login page that never shows an error and never returns a SAML response
+// makes doAuthenticate re-post the form. The server hands back a SAML
+// response after 20 posts so a regression fails the test instead of hanging.
+func TestClient_doAuthenticate_CapsLoginFormReposts(t *testing.T) {
+	page, err := os.ReadFile("example/loginpage.html")
+	require.Nil(t, err)
+	assertion, err := os.ReadFile("example/assertion.html")
+	require.Nil(t, err)
+
+	posts := 0
+	var ts *httptest.Server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts++
+			if posts > 20 {
+				_, _ = w.Write(assertion)
+				return
+			}
+		}
+		_, _ = w.Write(bytes.ReplaceAll(page, []byte(exampleLoginURL), []byte(ts.URL+"/submit")))
+	}))
+	defer ts.Close()
+
+	opts := &provider.HTTPClientOptions{IsWithRetries: false}
+	kc := Client{client: &provider.HTTPClient{Client: http.Client{}, Options: opts}}
+	kc.authErrorValidator, err = CustomizeAuthErrorValidator(&cfg.IDPAccount{})
+	require.Nil(t, err)
+
+	loginDetails := &creds.LoginDetails{URL: ts.URL, Username: "test", Password: "wrong"}
+	_, err = kc.Authenticate(loginDetails)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "login form was submitted")
+	require.Equal(t, maxLoginFormSubmissions, posts)
 }
 
 func TestClient_passwordValid_CustomValidator(t *testing.T) {

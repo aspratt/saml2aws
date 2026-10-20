@@ -94,7 +94,7 @@ driver from npm (`playwright-core@1.47.2` + Node 20) at
 | `TestScriptPrintsLoggedInCredentials` | `script --shell=env` prints the stored credentials |
 | `TestListRolesSingleRole` | `list-roles` shows the role from a one-role assertion. **Known bug, skipped** unless `E2E_KNOWN_BUGS=1` (see below) |
 | `TestWrongPasswordFailsWithErrorElementConfig` | a wrong password fails fast and writes no credentials, with `kc_auth_error_element` set for Keycloak 26 |
-| `TestWrongPasswordFailsDefaultConfig` | the same with the default config. **Known bug, skipped** unless `E2E_KNOWN_BUGS=1` (see below) |
+| `TestWrongPasswordFailsDefaultConfig` | the same with the default config, Keycloak 26 included (#13). Required; was a known-bug skip |
 
 ## Real AWS tier (`make e2e-aws`)
 
