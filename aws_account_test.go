@@ -138,3 +138,47 @@ func TestLocateRole(t *testing.T) {
 
 	assert.Equal(t, "arn:aws:iam::000000000001:role/Development", role.RoleARN)
 }
+
+// A redirect that lands on an error page must not be read as a single-role
+// user: the fallback only applies to a successful sign-in.
+func TestParseAWSAccountsRedirectToErrorPage(t *testing.T) {
+	assertion := singleRoleAssertion(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/saml", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/forbidden", http.StatusFound)
+	})
+	mux.HandleFunc("/forbidden", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("<html><body>Access denied</body></html>"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	accounts, err := ParseAWSAccounts(srv.URL+"/saml", assertion)
+	require.NoError(t, err)
+	assert.Empty(t, accounts)
+}
+
+// A redirect loop must stop after Go's default cap of 10 redirects, not
+// follow forever.
+func TestParseAWSAccountsRedirectLoop(t *testing.T) {
+	assertion := singleRoleAssertion(t)
+
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if hits > 50 {
+			// Bound the test if the cap is missing; the assertion below then fails.
+			_, _ = w.Write([]byte("<html></html>"))
+			return
+		}
+		http.Redirect(w, r, "/saml", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	_, err := ParseAWSAccounts(srv.URL+"/saml", assertion)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stopped after 10 redirects")
+	assert.LessOrEqual(t, hits, 11)
+}

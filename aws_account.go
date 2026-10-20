@@ -26,6 +26,10 @@ func ParseAWSAccounts(audience string, samlAssertion string) ([]*AWSAccount, err
 	redirected := false
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Keep the same cap as Go's default client.
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
 			redirected = true
 			return nil
 		},
@@ -47,7 +51,9 @@ func ParseAWSAccounts(audience string, samlAssertion string) ([]*AWSAccount, err
 		return nil, err
 	}
 
-	if len(accounts) == 0 && redirected {
+	// Only a successful sign-in can be a single-role redirect; an error page
+	// after a redirect is not.
+	if len(accounts) == 0 && redirected && res.StatusCode < 400 {
 		return accountsFromAssertion(samlAssertion)
 	}
 
