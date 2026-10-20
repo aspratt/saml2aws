@@ -1,0 +1,88 @@
+# saml2aws end-to-end harness. No bind mounts: every image is built from a
+# build context, so this works against a local or a remote Docker daemon.
+name: saml2aws-e2e
+
+x-runner: &runner
+  build:
+    context: ../..
+    dockerfile: test/e2e/runner.Dockerfile
+  image: saml2aws-e2e-runner
+  env_file: .work/e2e.env
+  environment:
+    E2E_IDP_URL: http://keycloak:8080/realms/e2e/protocol/saml/clients/amazon-aws
+    E2E_USERNAME: e2e-user
+  working_dir: /src
+
+services:
+  keycloak:
+    build: { context: ., dockerfile: keycloak/Dockerfile }
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    networks: [idp]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 3s
+      retries: 60
+
+  sts:
+    build: { context: ., dockerfile: sts/Dockerfile }
+    networks:
+      fakeaws:
+        aliases: [sts.amazonaws.com, sts.us-east-1.amazonaws.com, sts.ap-southeast-2.amazonaws.com]
+
+  signin:
+    build: { context: ., dockerfile: sts/signin.Dockerfile }
+    networks:
+      fakeaws:
+        aliases: [signin.aws.amazon.com]
+
+  # Unit tests: the repository's own `go test ./...`, unchanged.
+  unit:
+    <<: *runner
+    profiles: [unit]
+    network_mode: bridge
+    command: ["go", "test", "-count=1", "-cover", "./..."]
+
+  # Integration tests against Keycloak + moto (STS answered by moto).
+  e2e:
+    <<: *runner
+    profiles: [e2e]
+    networks: [idp, fakeaws]
+    environment:
+      E2E_IDP_URL: http://keycloak:8080/realms/e2e/protocol/saml/clients/amazon-aws
+      E2E_USERNAME: e2e-user
+      E2E_TARGET: moto
+      SSL_CERT_FILE: /src/test/e2e/.work/certs/ca.crt
+    depends_on:
+      keycloak: { condition: service_healthy }
+      sts: { condition: service_started }
+      signin: { condition: service_started }
+    command: ["go", "test", "-count=1", "-v", "-tags", "e2e", "./test/e2e/"]
+
+  # Integration tests against Keycloak + real AWS STS (no fakeaws network).
+  e2e-aws:
+    <<: *runner
+    profiles: [e2e-aws]
+    networks: [idp, egress]
+    environment:
+      E2E_IDP_URL: http://keycloak:8080/realms/e2e/protocol/saml/clients/amazon-aws
+      E2E_USERNAME: e2e-user
+      E2E_TARGET: aws
+    depends_on:
+      keycloak: { condition: service_healthy }
+    command: ["go", "test", "-count=1", "-v", "-tags", "e2e", "./test/e2e/"]
+
+  # Prints the Keycloak realm's SAML IdP metadata for the IAM SAML provider.
+  metadata:
+    <<: *runner
+    profiles: [tools]
+    networks: [idp]
+    depends_on:
+      keycloak: { condition: service_healthy }
+    command: ["curl", "-fsS", "http://keycloak:8080/realms/e2e/protocol/saml/descriptor"]
+
+networks:
+  idp: { internal: true }
+  fakeaws: { internal: true }
+  egress: {}
