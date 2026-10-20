@@ -13,7 +13,10 @@ Docker daemon and from a clean checkout.
 | `make aws-teardown` | Deletes the IAM resources `e2e-aws` created | `AWS_PROFILE` |
 | `make down` / `make clean` | Stop the stack / also delete `.work/` | |
 
-Run from this directory (`make -C test/e2e e2e` from the repo root).
+Run from this directory (`make -C test/e2e e2e` from the repo root). Run one
+target at a time per checkout: targets share `.work/` and the Compose project,
+so overlapping runs overwrite each other's realm and tear down each other's
+containers.
 
 ## How it works
 
