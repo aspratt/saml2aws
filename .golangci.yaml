@@ -1,11 +1,34 @@
+version: "2"
 linters:
-  disable-all: true
+  default: none
   enable:
-    - goimports
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
-    - typecheck
     - unused
+  settings:
+    staticcheck:
+      # v1 ran staticcheck + gosimple only; v2's staticcheck also runs the
+      # stylecheck (ST) and quickfix (QF) groups, which this repo never enabled.
+      checks: ["all", "-ST*", "-QF*"]
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

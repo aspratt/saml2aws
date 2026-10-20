@@ -3,7 +3,7 @@ ARCH=$(shell uname -m)
 OS?=$(shell uname)
 ITERATION := 1
 
-GOLANGCI_VERSION = 1.55.2
+GOLANGCI_VERSION = 2.14.0
 GORELEASER := $(shell command -v goreleaser 2> /dev/null)
 
 SOURCE_FILES?=$$(go list ./... | grep -v /vendor/)
