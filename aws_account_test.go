@@ -1,11 +1,73 @@
 package saml2aws
 
 import (
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// singleRoleAssertion returns testdata/assertion.xml, base64 encoded, with the
+// second role removed, so the assertion carries exactly one role.
+func singleRoleAssertion(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile("testdata/assertion.xml")
+	assert.Nil(t, err)
+	xml := strings.Replace(string(data),
+		"\n        <AttributeValue>arn:aws:iam::123123123123:saml-provider/ExampleADFS,arn:aws:iam::123123123123:role/AWS-Admin-CloudOPSNonProd</AttributeValue>", "", 1)
+	assert.NotEqual(t, string(data), xml)
+	return base64.StdEncoding.EncodeToString([]byte(xml))
+}
+
+// A single-role user: AWS answers the sign-in POST with a 302 to the console
+// instead of the role chooser, so the chooser page is never served.
+func TestParseAWSAccountsSingleRoleRedirect(t *testing.T) {
+	assertion := singleRoleAssertion(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/saml", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, assertion, r.FormValue("SAMLResponse"))
+		http.Redirect(w, r, "/console", http.StatusFound)
+	})
+	mux.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html><body>AWS Management Console</body></html>"))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	accounts, err := ParseAWSAccounts(srv.URL+"/saml", assertion)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+
+	account := accounts[0]
+	assert.Equal(t, "Account: 123123123123", account.Name)
+	require.Len(t, account.Roles, 1)
+	assert.Equal(t, "arn:aws:iam::123123123123:role/AWS-Admin-CloudOPSBuild", account.Roles[0].RoleARN)
+	assert.Equal(t, "AWS-Admin-CloudOPSBuild", account.Roles[0].Name)
+}
+
+// Regression guard: a multi-role user gets the chooser page, which is parsed
+// as before.
+func TestParseAWSAccountsChooserPage(t *testing.T) {
+	data, err := os.ReadFile("testdata/saml.html")
+	assert.Nil(t, err)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	accounts, err := ParseAWSAccounts(srv.URL, singleRoleAssertion(t))
+	require.NoError(t, err)
+	require.Len(t, accounts, 2)
+	assert.Equal(t, "Account: account-alias (000000000001)", accounts[0].Name)
+}
 
 func TestExtractAWSAccounts(t *testing.T) {
 	data, err := os.ReadFile("testdata/saml.html")
