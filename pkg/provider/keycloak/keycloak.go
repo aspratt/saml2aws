@@ -35,9 +35,15 @@ type Client struct {
 var (
 	defaultAuthErrorElementV1 = "span#input-error"
 	defaultAuthErrorElementV2 = "div#input-error-username"
-	DefaultAuthErrorElement   = fmt.Sprintf("%s, %s", defaultAuthErrorElementV1, defaultAuthErrorElementV2)
+	defaultAuthErrorElementV3 = "div#input-error-password"
+	DefaultAuthErrorElement   = fmt.Sprintf("%s, %s, %s", defaultAuthErrorElementV1, defaultAuthErrorElementV2, defaultAuthErrorElementV3)
 	DefaultAuthErrorMessage   = "Invalid username or password."
 )
+
+// maxStalledLoginForms caps how many login form submissions one Authenticate
+// call may make when the response has no MFA form, no SAML assertion and no
+// recognised error. MFA retries are bounded by the credential list instead.
+const maxStalledLoginForms = 3
 
 type authErrorValidator struct {
 	httpMessageRE *regexp.Regexp
@@ -48,6 +54,7 @@ type authContext struct {
 	mfaToken                string
 	authenticatorIndex      uint
 	authenticatorIndexValid bool
+	stalledLoginForms       int
 }
 
 // New create a new KeyCloakClient
@@ -94,7 +101,7 @@ func CustomizeAuthErrorValidator(account *cfg.IDPAccount) (*authErrorValidator, 
 
 // Authenticate logs into KeyCloak and returns a SAML response
 func (kc *Client) Authenticate(loginDetails *creds.LoginDetails) (string, error) {
-	return kc.doAuthenticate(&authContext{loginDetails.MFAToken, 0, true}, loginDetails)
+	return kc.doAuthenticate(&authContext{loginDetails.MFAToken, 0, true, 0}, loginDetails)
 }
 
 func (kc *Client) doAuthenticate(authCtx *authContext, loginDetails *creds.LoginDetails) (string, error) {
@@ -116,7 +123,9 @@ func (kc *Client) doAuthenticate(authCtx *authContext, loginDetails *creds.Login
 		return "", errors.Wrap(err, "error parsing document")
 	}
 
+	mfaStep := false
 	if containsTotpForm(doc) {
+		mfaStep = true
 		totpSubmitURL, err := extractSubmitURL(doc)
 		if err != nil {
 			return "", errors.Wrap(err, "unable to locate IDP totp form submit URL")
@@ -127,6 +136,7 @@ func (kc *Client) doAuthenticate(authCtx *authContext, loginDetails *creds.Login
 			return "", errors.Wrap(err, "error posting totp form")
 		}
 	} else if containsWebauthnForm(doc) {
+		mfaStep = true
 		credentialIDs, challenge, rpId, err := extractWebauthnParameters(doc)
 		if err != nil {
 			return "", errors.Wrap(err, "could not extract Webauthn parameters")
@@ -143,6 +153,12 @@ func (kc *Client) doAuthenticate(authCtx *authContext, loginDetails *creds.Login
 	}
 	samlResponse, err := extractSamlResponse(doc)
 	if err != nil && authCtx.authenticatorIndexValid && passwordValid(doc, kc.authErrorValidator) {
+		if !mfaStep {
+			authCtx.stalledLoginForms++
+			if authCtx.stalledLoginForms >= maxStalledLoginForms {
+				return "", fmt.Errorf("login form was submitted %d times without a SAML response or a recognised error; check kc_auth_error_element matches the IdP's error element", authCtx.stalledLoginForms)
+			}
+		}
 		return kc.doAuthenticate(authCtx, loginDetails)
 	}
 	return samlResponse, err
