@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/aws/aws-sdk-go/service/sts/stsiface"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/versent/saml2aws/v2"
@@ -391,7 +393,7 @@ func loginToStsUsingRole(account *cfg.IDPAccount, role *saml2aws.AWSRole, samlAs
 
 	log.Println("Requesting AWS credentials using SAML assertion.")
 
-	resp, err := svc.AssumeRoleWithSAML(params)
+	resp, err := assumeRoleWithSAML(svc, params)
 	if err != nil {
 		return nil, errors.Wrap(err, "Error retrieving STS credentials using SAML.")
 	}
@@ -405,6 +407,32 @@ func loginToStsUsingRole(account *cfg.IDPAccount, role *saml2aws.AWSRole, samlAs
 		Expires:          resp.Credentials.Expiration.Local(),
 		Region:           account.Region,
 	}, nil
+}
+
+// assumeRoleWithSAML calls STS and, if STS rejects the requested DurationSeconds
+// as above the role's MaxSessionDuration, warns and retries once without
+// DurationSeconds so STS applies its default of one hour.
+func assumeRoleWithSAML(svc stsiface.STSAPI, params *sts.AssumeRoleWithSAMLInput) (*sts.AssumeRoleWithSAMLOutput, error) {
+	resp, err := svc.AssumeRoleWithSAML(params)
+	if err == nil || params.DurationSeconds == nil || !isDurationExceedsMaxError(err) {
+		return resp, err
+	}
+
+	log.Printf("Warning: the requested session duration of %d seconds exceeds the maximum session duration for role %s. Retrying with the STS default of 3600 seconds.",
+		aws.Int64Value(params.DurationSeconds), aws.StringValue(params.RoleArn))
+
+	retry := *params
+	retry.DurationSeconds = nil
+	return svc.AssumeRoleWithSAML(&retry)
+}
+
+func isDurationExceedsMaxError(err error) bool {
+	var aerr awserr.Error
+	if !errors.As(err, &aerr) {
+		return false
+	}
+	return aerr.Code() == "ValidationError" &&
+		strings.Contains(aerr.Message(), "DurationSeconds exceeds the MaxSessionDuration")
 }
 
 func saveCredentials(awsCreds *awsconfig.AWSCredentials, sharedCreds *awsconfig.CredentialsProvider) error {
