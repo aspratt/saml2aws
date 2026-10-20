@@ -2,10 +2,12 @@ package saml2aws
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/pkg/errors"
@@ -19,7 +21,21 @@ type AWSAccount struct {
 
 // ParseAWSAccounts extract the aws accounts from the saml assertion
 func ParseAWSAccounts(audience string, samlAssertion string) ([]*AWSAccount, error) {
-	res, err := http.PostForm(audience, url.Values{"SAMLResponse": {samlAssertion}})
+	// A user with a single role is redirected to the console instead of being
+	// shown the role chooser, so note any redirect for the fallback below.
+	redirected := false
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Keep the same cap as Go's default client.
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			redirected = true
+			return nil
+		},
+	}
+
+	res, err := client.PostForm(audience, url.Values{"SAMLResponse": {samlAssertion}})
 	if err != nil {
 		return nil, errors.Wrap(err, "error retrieving AWS login form")
 	}
@@ -30,7 +46,74 @@ func ParseAWSAccounts(audience string, samlAssertion string) ([]*AWSAccount, err
 		return nil, errors.Wrap(err, "error retrieving AWS login body")
 	}
 
-	return ExtractAWSAccounts(data)
+	accounts, err := ExtractAWSAccounts(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Only a successful sign-in can be a single-role redirect; an error page
+	// after a redirect is not.
+	if len(accounts) == 0 && redirected && res.StatusCode < 400 {
+		return accountsFromAssertion(samlAssertion)
+	}
+
+	return accounts, nil
+}
+
+// accountsFromAssertion builds the accounts from the roles in the SAML
+// assertion. It is the fallback for when AWS redirects instead of serving the
+// role chooser. The assertion carries no account alias, so accounts are named
+// by id, as the chooser names accounts that have no alias.
+func accountsFromAssertion(samlAssertion string) ([]*AWSAccount, error) {
+	data, err := base64.StdEncoding.DecodeString(samlAssertion)
+	if err != nil {
+		return nil, errors.Wrap(err, "error decoding saml assertion")
+	}
+
+	roles, err := ExtractAwsRoles(data)
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing aws roles")
+	}
+
+	awsRoles, err := ParseAWSRoles(roles)
+	if err != nil {
+		return nil, errors.Wrap(err, "error parsing aws roles")
+	}
+
+	accounts := []*AWSAccount{}
+	byID := make(map[string]*AWSAccount)
+	for _, awsRole := range awsRoles {
+		id := accountIDFromRoleARN(awsRole.RoleARN)
+
+		account, ok := byID[id]
+		if !ok {
+			account = &AWSAccount{Name: "Account: " + id}
+			byID[id] = account
+			accounts = append(accounts, account)
+		}
+
+		account.Roles = append(account.Roles, &AWSRole{
+			RoleARN: awsRole.RoleARN,
+			Name:    roleNameFromRoleARN(awsRole.RoleARN),
+		})
+	}
+
+	return accounts, nil
+}
+
+// accountIDFromRoleARN returns the account id from an ARN of the form
+// arn:partition:service:region:account-id:resource
+func accountIDFromRoleARN(roleARN string) string {
+	parts := strings.Split(roleARN, ":")
+	if len(parts) < 5 {
+		return ""
+	}
+	return parts[4]
+}
+
+// roleNameFromRoleARN returns the role name, the last path segment of the ARN
+func roleNameFromRoleARN(roleARN string) string {
+	return roleARN[strings.LastIndex(roleARN, "/")+1:]
 }
 
 // ExtractAWSAccounts extract the accounts from the AWS html page

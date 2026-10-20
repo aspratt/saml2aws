@@ -91,7 +91,7 @@ no environment overrides. `make unit` alone proves them.
 | `TestLoginWritesCredentials` | `login --skip-prompt` writes the `[e2e]` profile with key, secret and session token; `x_principal_arn` is the assumed-role ARN; expiry is about 1h out; the credentials work: `GetCallerIdentity` returns the assumed role |
 | `TestBrowserLoginWritesCredentials` | `login` through `--idp-provider=Browser`: headless Chromium autofills the username and password on the Keycloak login page, and the credentials match `TestLoginWritesCredentials`. Uses the driver and Chromium the runner image installed |
 | `TestScriptPrintsLoggedInCredentials` | `script --shell=env` prints the stored credentials |
-| `TestListRolesSingleRole` | `list-roles` shows the role from a one-role assertion. **Known bug, skipped** unless `E2E_KNOWN_BUGS=1` (see below) |
+| `TestListRolesSingleRole` | `list-roles` shows the role from a one-role assertion (fallback to the assertion's roles when sign-in redirects) |
 | `TestWrongPasswordFailsWithErrorElementConfig` | a wrong password fails fast and writes no credentials, with `kc_auth_error_element` set for Keycloak 26 |
 | `TestWrongPasswordFailsDefaultConfig` | the same with the default config, Keycloak 26 included (#13). Required; was a known-bug skip |
 
@@ -153,7 +153,8 @@ to it.
    but with one valid role AWS answers `302` to the console, so the chooser
    never appears. `ParseAWSAccounts` follows the redirect, finds no
    `fieldset > div.saml-account`, and saml2aws exits 0 with no output.
-   Verified against real AWS. Reproduce with `E2E_KNOWN_BUGS=1`.
+   Verified against real AWS. Fixed: when sign-in redirects and no accounts
+   are parsed, `list-roles` now builds the accounts from the assertion's roles.
 6. `script` validates the IdP account (it needs `--url` and the provider)
    even though it only prints stored credentials.
 

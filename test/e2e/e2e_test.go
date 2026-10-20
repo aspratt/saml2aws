@@ -206,13 +206,15 @@ func TestScriptPrintsLoggedInCredentials(t *testing.T) {
 	require.Contains(t, out, "AWS_ACCESS_KEY_ID="+key)
 }
 
-// Known bug: list-roles reads account names from the AWS sign-in role
-// chooser, but with a single role AWS skips the chooser and redirects to the
-// console. saml2aws follows the redirect, finds no accounts and prints
-// nothing, without an error. Set E2E_KNOWN_BUGS=1 to run it.
+// list-roles reads account names from the AWS sign-in role chooser, but with a
+// single role AWS skips the chooser and redirects to the console. Once the
+// redirect finds no accounts, list-roles falls back to the roles in the
+// assertion (fork issue aspratt/saml2aws#14).
 func TestListRolesSingleRole(t *testing.T) {
-	if os.Getenv("E2E_KNOWN_BUGS") == "" {
-		t.Skip("known bug: list-roles prints nothing when the assertion has one role")
+	// list-roles always posts to the real AWS sign-in page, which moto doesn't
+	// stand in for and the offline lane can't reach, so this runs in e2e-aws only.
+	if mustEnv(t, "E2E_TARGET") != "aws" {
+		t.Skip("needs the real AWS sign-in page; runs in the e2e-aws lane only")
 	}
 	home := t.TempDir()
 	out, err := run(t, home, append(append([]string{"list-roles"}, idpArgs(t)...),
