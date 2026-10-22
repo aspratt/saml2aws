@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -73,30 +74,38 @@ type ctxKey string
 
 // Authenticate Authenticate to PingFed and return the data from the body of the SAML assertion.
 func (ac *Client) Authenticate(loginDetails *creds.LoginDetails) (string, error) {
-	ac.client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		req.SetBasicAuth(loginDetails.Username, loginDetails.Password)
-		return nil
-	}
-
-	ac.client.Transport = ntlmssp.Negotiator{
-		RoundTripper: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}
-
 	url := fmt.Sprintf("%s/idp/startSSO.ping?PartnerSpId=%s", loginDetails.URL, ac.idpAccount.AmazonWebservicesURN)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", errors.Wrap(err, "error building request")
 	}
 
+	// re-send Basic auth on redirects only to the original host, and never over a downgraded scheme
+	ac.client.CheckRedirect = basicAuthRedirectPolicy(req.URL, loginDetails.Username, loginDetails.Password)
+
 	req.Header.Set("User-Agent", "Automation")
 	req.SetBasicAuth(loginDetails.Username, loginDetails.Password)
 
 	ctx := context.WithValue(context.Background(), ctxKey("login"), loginDetails)
 	return ac.follow(ctx, req)
+}
+
+// basicAuthRedirectPolicy returns a CheckRedirect func that re-applies Basic auth only when the
+// redirect target has the same host (and port) as origin and does not downgrade from https to http,
+// and strips any Authorization header otherwise.
+func basicAuthRedirectPolicy(origin *url.URL, username, password string) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		// net/http keeps Authorization when only the port changes, so drop it explicitly
+		if !strings.EqualFold(req.URL.Host, origin.Host) || (origin.Scheme == "https" && req.URL.Scheme != "https") {
+			req.Header.Del("Authorization")
+			return nil
+		}
+		req.SetBasicAuth(username, password)
+		return nil
+	}
 }
 
 func (ac *Client) follow(ctx context.Context, req *http.Request) (string, error) {

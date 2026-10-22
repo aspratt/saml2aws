@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
 	"strings"
@@ -652,4 +653,116 @@ func TestClient_follow(t *testing.T) {
 			}
 		})
 	}
+}
+
+func samlFormHandler(w http.ResponseWriter, _ *http.Request) {
+	fmt.Fprintf(w, ntlmTestSAMLForm, base64.StdEncoding.EncodeToString([]byte(ntlmTestSAMLBody)))
+}
+
+// TestAuthenticateHonoursSkipVerify checks that Authenticate keeps the TLS
+// verification setting from the account instead of forcing InsecureSkipVerify.
+func TestAuthenticateHonoursSkipVerify(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(samlFormHandler))
+	defer srv.Close()
+
+	loginDetails := &creds.LoginDetails{Username: "testuser", Password: "testtestlol", URL: srv.URL}
+
+	t.Run("verification on rejects an untrusted certificate", func(t *testing.T) {
+		client, err := New(&cfg.IDPAccount{Provider: "PingNTLM", MFA: "Auto", SkipVerify: false})
+		require.NoError(t, err)
+		_, err = client.Authenticate(loginDetails)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "certificate")
+	})
+
+	t.Run("skip verify accepts an untrusted certificate", func(t *testing.T) {
+		client, err := New(&cfg.IDPAccount{Provider: "PingNTLM", MFA: "Auto", SkipVerify: true})
+		require.NoError(t, err)
+		got, err := client.Authenticate(loginDetails)
+		require.NoError(t, err)
+		assert.Equal(t, base64.StdEncoding.EncodeToString([]byte(ntlmTestSAMLBody)), got)
+	})
+}
+
+// authRecorder records the Basic credentials on each request handed to the
+// NTLM negotiator, which uses them for the handshake with that host.
+type authRecorder struct {
+	mu   sync.Mutex
+	next http.RoundTripper
+	auth map[string]bool // path -> carried Basic auth
+}
+
+func (a *authRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	_, _, ok := req.BasicAuth()
+	a.mu.Lock()
+	a.auth[req.URL.Host+req.URL.Path] = ok
+	a.mu.Unlock()
+	return a.next.RoundTrip(req)
+}
+
+// TestAuthenticateBasicAuthOnlyToOriginalHost checks that Basic credentials are
+// re-sent on a same-host redirect but not to a redirect target on another host.
+func TestAuthenticateBasicAuthOnlyToOriginalHost(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(samlFormHandler))
+	defer other.Close()
+
+	var origin *httptest.Server
+	origin = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/idp/startSSO.ping":
+			http.Redirect(w, r, origin.URL+"/same", http.StatusFound)
+		case "/same":
+			http.Redirect(w, r, other.URL+"/elsewhere", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer origin.Close()
+
+	client, err := New(&cfg.IDPAccount{Provider: "PingNTLM", MFA: "Auto"})
+	require.NoError(t, err)
+	rec := &authRecorder{next: client.client.Transport, auth: map[string]bool{}}
+	client.client.Transport = rec
+
+	_, err = client.Authenticate(&creds.LoginDetails{Username: "testuser", Password: "testtestlol", URL: origin.URL})
+	require.NoError(t, err)
+
+	originHost := strings.TrimPrefix(origin.URL, "http://")
+	otherHost := strings.TrimPrefix(other.URL, "http://")
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	assert.Equal(t, map[string]bool{
+		originHost + "/idp/startSSO.ping": true,
+		originHost + "/same":              true,
+		otherHost + "/elsewhere":          false,
+	}, rec.auth)
+}
+
+func TestBasicAuthRedirectPolicy(t *testing.T) {
+	origin, _ := url.Parse("https://idp.example.com/idp/startSSO.ping")
+	policy := basicAuthRedirectPolicy(origin, "u", "p")
+
+	cases := []struct {
+		target   string
+		wantAuth bool
+	}{
+		{"https://idp.example.com/next", true},
+		{"https://IDP.example.com/next", true},
+		{"http://idp.example.com/next", false},
+		{"https://evil.example.com/next", false},
+		{"https://idp.example.com:8443/next", false},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest("GET", c.target, nil)
+		req.SetBasicAuth("copied", "by-net-http")
+		require.NoError(t, policy(req, nil))
+		u, _, ok := req.BasicAuth()
+		assert.Equal(t, c.wantAuth, ok, c.target)
+		if ok {
+			assert.Equal(t, "u", u, c.target)
+		}
+	}
+
+	req := httptest.NewRequest("GET", "https://idp.example.com/next", nil)
+	assert.Error(t, policy(req, make([]*http.Request, 10)))
 }
